@@ -1,0 +1,16 @@
+[package]
+edition = "2021"
+name = "rs_crud"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+data-encoding = "2.4.0"
+jsonwebtoken = "8.3.0"
+postgres = "0.19"
+ring = "0.16.20"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+time = "0.3.4"
