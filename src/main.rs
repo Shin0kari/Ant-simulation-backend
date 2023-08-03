@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use data_encoding::HEXUPPER;
 use postgres::Error as PostgresError;
 use postgres::{Client, NoTls};
-// use std::env;
+use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
@@ -14,76 +14,20 @@ use time::{Duration, OffsetDateTime};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    aud: String, // email
-    #[serde(with = "jwt_numeric_date")]
-    iat: OffsetDateTime,
-    #[serde(with = "jwt_numeric_date")]
-    exp: OffsetDateTime,
-    pswd: String, // мб это убрать, нужо будет спросить
-    role: String,
-}
-
-impl Claims {
-    // проблема, что при изменении email не проходит верификацию
-    // Проверка JWT
-    pub fn verify_token(token: &str, user: &User) -> Result<Claims, std::io::Error> {
-        let decoding_key = DecodingKey::from_secret(KEY.as_bytes());
-        let mut validation = Validation::new(Algorithm::HS512);
-        validation.set_audience(&[user.email.clone().unwrap().as_str()]);
-
-        let token_data = match decode::<Claims>(&token, &decoding_key, &validation) {
-            Ok(c) => c,
-            Err(err) => match *err.kind() {
-                jsonwebtoken::errors::ErrorKind::InvalidToken => panic!("Token is invalid"), // Example on how to handle a specific error
-                jsonwebtoken::errors::ErrorKind::InvalidIssuer => panic!("Issuer is invalid"), // Example on how to handle a specific error
-                _ => panic!("Some other errors"),
-            },
-        };
-
-        // let token_data = match decode::<Claims>(&token.to_string(), &decoding_key, &validation) {
-        //     Ok(c) => c,
-        //     Err(err) => match *err.kind() {
-        //         jsonwebtoken::errors::ErrorKind::InvalidToken => panic!(), // Example on how to handle a specific error
-        //         _ => panic!(),
-        //     },
-        // };
-
-        Ok(token_data.claims)
-        // Можно проверять другие данные, доступные в token_data
-    }
-
-    // если меняется одно из aud(email), pswd, role то создаём заново токен для пользователя
-    pub fn create_jwt_token(user: &User) -> String {
-        let my_claims = Claims {
-            aud: user.email.clone().unwrap().to_owned(),
-            iat: OffsetDateTime::now_utc(),
-            exp: OffsetDateTime::now_utc() + Duration::days(1),
-            pswd: user.pswd.clone().unwrap().to_owned(),
-            role: user.role.clone().unwrap().to_owned(),
-        };
-
-        let header = Header {
-            alg: Algorithm::HS512,
-            ..Default::default()
-        };
-
-        let token = match encode(
-            &header,
-            &my_claims,
-            &EncodingKey::from_secret(KEY.as_bytes()),
-        ) {
-            Ok(t) => t,
-            Err(_) => panic!(), // in practice you would return the error
-        };
-
-        token
-    }
-}
-
 // поменять секретный ключ на что то более секретное
 const KEY: &str = "secret";
+
+static PBKDF2_ALG: pbkdf2::Algorithm = pbkdf2::PBKDF2_HMAC_SHA256;
+const CREDENTIAL_LEN: usize = digest::SHA256_OUTPUT_LEN;
+pub type Credential = [u8; CREDENTIAL_LEN];
+
+// задаю через docker-compose, поменять на .env файл и изменить сам адрес бд
+const DB_URL: &'static str = env!("DATABASE_URL");
+// const DB_URL: &str = "postgres://postgres:postgres@db:5432/postgres";
+
+const OK_RESPONSE: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n";
+const NOT_FOUND_RESPONSE: &str = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
+const INTERNAL_SERVER_ERROR: &str = "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n";
 
 mod jwt_numeric_date {
     //! Custom serialization of OffsetDateTime to conform with the JWT spec (RFC 7519 section 2, "Numeric Date")
@@ -109,7 +53,7 @@ mod jwt_numeric_date {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct User {
     id: Option<i32>,
     role: Option<String>,
@@ -118,17 +62,64 @@ struct User {
     email: Option<String>,
 }
 
-// impl User {
-//     fn request_body_sign_up() {}
-// }
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, // email
+    // aud: String, // email, было изменил
+    #[serde(with = "jwt_numeric_date")]
+    iat: OffsetDateTime,
+    #[serde(with = "jwt_numeric_date")]
+    exp: OffsetDateTime,
+    pswd: String, // мб это убрать, нужо будет спросить
+    role: String,
+}
 
-static PBKDF2_ALG: pbkdf2::Algorithm = pbkdf2::PBKDF2_HMAC_SHA256;
-const CREDENTIAL_LEN: usize = digest::SHA256_OUTPUT_LEN;
-pub type Credential = [u8; CREDENTIAL_LEN];
+impl Claims {
+    // Проверка JWT
+    pub fn verify_token(token: &str, _user: &User) -> Result<Claims, std::io::Error> {
+        let decoding_key = DecodingKey::from_secret(KEY.as_bytes());
+        let validation = Validation::new(Algorithm::HS512);
 
-// enum Error {
-//     WrongUsernameOrPassword,
-// }
+        let token_data = match decode::<Claims>(&token, &decoding_key, &validation) {
+            Ok(c) => c,
+            Err(err) => match *err.kind() {
+                jsonwebtoken::errors::ErrorKind::InvalidToken => panic!("Token is invalid"), // Example on how to handle a specific error
+                jsonwebtoken::errors::ErrorKind::InvalidIssuer => panic!("Issuer is invalid"), // Example on how to handle a specific error
+                _ => panic!("Some other errors"),
+            },
+        };
+
+        Ok(token_data.claims)
+    }
+
+    // если меняется одно из aud(email), pswd, role то создаём заново токен для пользователя
+    pub fn create_jwt_token(user: &User) -> String {
+        let my_claims = Claims {
+            sub: user.email.clone().unwrap().to_owned(),
+            // aud: user.email.clone().unwrap().to_owned(),
+            iat: OffsetDateTime::now_utc(),
+            exp: OffsetDateTime::now_utc() + Duration::days(1),
+            pswd: user.pswd.clone().unwrap().to_owned(),
+            role: user.role.clone().unwrap().to_owned(),
+        };
+
+        let header = Header {
+            alg: Algorithm::HS512,
+            ..Default::default()
+        };
+
+        let token = match encode(
+            &header,
+            &my_claims,
+            &EncodingKey::from_secret(KEY.as_bytes()),
+        ) {
+            Ok(t) => t,
+            Err(_) => panic!(), // in practice you would return the error
+        };
+
+        token
+    }
+}
 
 struct PasswordForDatabase {
     pbkdf2_iterations: NonZeroU32,
@@ -136,12 +127,22 @@ struct PasswordForDatabase {
 }
 
 impl PasswordForDatabase {
-    pub fn generate_hash_password(&mut self, user: &User) -> String {
-        let salt = self.salt(&user.name.as_ref().unwrap());
+    pub fn generate_hash_password(user: &User) -> String {
+        let db = PasswordForDatabase {
+            pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
+            // нужно сгенерировать новый
+            db_salt_component: [
+                // This value was generated from a secure PRNG.
+                0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
+                0xfe, 0x39, 0x01, 0x8a,
+            ],
+        };
+
+        let salt = db.salt(&user.email.as_ref().unwrap());
         let mut hash_pswd: Credential = [0u8; CREDENTIAL_LEN];
         pbkdf2::derive(
             PBKDF2_ALG,
-            self.pbkdf2_iterations,
+            db.pbkdf2_iterations,
             &salt,
             user.pswd.as_ref().unwrap().as_bytes(),
             &mut hash_pswd, // pbkdf2_hash
@@ -150,25 +151,15 @@ impl PasswordForDatabase {
         HEXUPPER.encode(&hash_pswd)
     }
 
-    pub fn verify_password(&self, user: &User, client: &mut Client) -> bool {
+    pub fn verify_password(user: &User, client: &mut Client) -> bool {
         // добавить проверку подключения к бд
         match client.query_one(
             "SELECT users.pswd FROM users WHERE users.email = $1",
             &[&user.email],
         ) {
             Ok(row) => {
-                let mut db = PasswordForDatabase {
-                    pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                    // нужно сгенерировать новый
-                    db_salt_component: [
-                        // This value was generated from a secure PRNG.
-                        0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                        0xfe, 0x39, 0x01, 0x8a,
-                    ],
-                };
-
                 let actual_pswd: String = row.get(0);
-                let hash_pswd = db.generate_hash_password(&user);
+                let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
 
                 actual_pswd == hash_pswd
             }
@@ -185,15 +176,7 @@ impl PasswordForDatabase {
     }
 }
 
-// задаю через docker-compose, поменять на .env файл и изменить сам адрес бд
-// const DB_URL: &'static str = env!("DATABASE_URL");
-const DB_URL: &str = "postgres://postgres:postgres@db:5432/postgres";
-
-const OK_RESPONSE: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n";
-const NOT_FOUND_RESPONSE: &str = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
-const INTERNAL_SERVER_ERROR: &str = "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n";
-
-// изменить структуру до готовой и добавить создание суперюзеров
+// изменить структуру до готовой и добавить создание суперюзеров?
 fn set_database() -> Result<(), PostgresError> {
     let mut client = Client::connect(DB_URL, NoTls)?;
 
@@ -207,6 +190,25 @@ fn set_database() -> Result<(), PostgresError> {
         )",
     )?;
     Ok(())
+}
+
+fn get_id_from_request(request: &str) -> &str {
+    request
+        .split("/")
+        .nth(2)
+        .unwrap_or_default()
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+}
+
+fn get_token_from_request(request: &str) -> Result<&str, std::io::Error> {
+    let token: &str = &request.clone().split("\r\n").nth(1).unwrap_or_default()[22..];
+    Ok(token)
+}
+
+fn get_user_request_body(request: &str) -> Result<User, serde_json::Error> {
+    serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())
 }
 
 fn main() {
@@ -260,23 +262,17 @@ fn handle_client(mut stream: TcpStream) {
     }
 }
 
-fn get_id_from_request(request: &str) -> &str {
-    request
-        .split("/")
-        .nth(2)
-        .unwrap_or_default()
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-}
+fn user_update(user: User, mut client: Client, actual_id: i32) -> (String, String) {
+    let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
 
-fn get_token_from_request(request: &str) -> Result<&str, std::io::Error> {
-    let token: &str = &request.clone().split("\r\n").nth(1).unwrap_or_default()[22..];
-    Ok(token)
-}
+    client
+        .execute(
+        "UPDATE users SET (name, pswd, email) = ($1, $2, $3) WHERE id = $4",
+        &[&user.name, &hash_pswd, &user.email, &actual_id],
+    )
+    .unwrap();
 
-fn get_user_request_body(request: &str) -> Result<User, serde_json::Error> {
-    serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())
+    (OK_RESPONSE.to_string(), "User updated".to_string())
 }
 
 // добавить создание новых токенов
@@ -288,41 +284,23 @@ fn handle_put_request(request: &str) -> (String, String) {
     ) {
         (Ok(user), Ok(token), Ok(mut client)) => {
             match Claims::verify_token(token, &user) {
-                Ok(claims) => match claims.role {
+                Ok(claims) => {
+                    match claims.role {
                     r if r == "user".to_string() => {
+                        println!("Ne admin");
                         match (
                             client.query_one(
                             "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                             &[&user.email]),
-                            client.query_one("SELECT users.id FROM users WHERE users.email = $1", &[&claims.aud]),
+                            client.query_one("SELECT users.id FROM users WHERE users.email = $1", &[&claims.sub]),
                         ) {
                             (Ok(check_email), Ok(id)) => {
-
-                                let user_presence: bool = check_email.get(0);
+                                let user_email_presence: bool = check_email.get(0);
                                 let actual_id: i32 = id.get(0); 
-                                    
-                                    // изменённый email и истинный email
-                                if user.email != Some(claims.aud) {
-                                    if user_presence == false {
-                                        let mut db = PasswordForDatabase {
-                                            pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                                            db_salt_component: [
-                                                // This value was generated from a secure PRNG.
-                                                0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                                                0xfe, 0x39, 0x01, 0x8a,
-                                            ],
-                                        };
-                                            
-                                        let hash_pswd = db.generate_hash_password(&user);
-
-                                        client
-                                            .execute(
-                                            "UPDATE users SET (name, pswd, email, role) VALUES ($1, $2, $3, $4) WHERE id = $5",
-                                            &[&user.name, &hash_pswd, &user.email, &"user".to_string(), &actual_id],
-                                        )
-                                        .unwrap();
-
-                                        (OK_RESPONSE.to_string(), "User updated".to_string())
+ 
+                                if user.email != Some(claims.sub) {
+                                    if user_email_presence == false {
+                                        user_update(user, client, actual_id)
                                     } else {
                                         (
                                             OK_RESPONSE.to_string(), // изменить на другу ошибку
@@ -330,27 +308,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                         )
                                     }
                                 } else {
-                                    let mut db = PasswordForDatabase {
-                                        pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                                        db_salt_component: [
-                                            // This value was generated from a secure PRNG.
-                                            0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                                            0xfe, 0x39, 0x01, 0x8a,
-                                        ],
-                                    };
-
-                                    let hash_pswd = db.generate_hash_password(&user);
-
-                                    println!("User_name: {:?}, pswd: {}, user_email: {:?}, id: {}", &user.name, &hash_pswd, &user.email, &actual_id);
-
-                                    client
-                                        .execute(
-                                        "UPDATE users SET (name, pswd, email, role) = ($1, $2, $3, $4) WHERE id = $5",
-                                        &[&user.name, &hash_pswd, &user.email, &"user".to_string(), &actual_id],
-                                    )
-                                    .unwrap();
-
-                                    (OK_RESPONSE.to_string(), "User updated".to_string())
+                                    user_update(user, client, actual_id)
                                 }
                             }
                             _ => {
@@ -360,136 +318,106 @@ fn handle_put_request(request: &str) -> (String, String) {
                                 )
                             }
                         }
-                    }
+                    },
                     r if r == "admin".to_string() => {
                         match get_id_from_request(&request).parse::<i32>() {
                             Ok(get_id) => {
-                                if get_id == 0 {
-                                    match (
-                                    client.query_one(
-                                    "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
-                                    &[&user.email]),
-                                    client.query_one("SELECT users.id FROM users WHERE users.email = $1", &[&claims.aud]),
-                                ) {
-                                        (Ok(check_email), Ok(id)) => {
-                                            let user_presence: bool = check_email.get(0);
-                                            let actual_id: i32 = id.get(0); 
-        
-                                            // изменённый email и истинный email
-                                            if user.email != Some(claims.aud) {
-                                                if user_presence == false {
-                                                    let mut db = PasswordForDatabase {
-                                                        pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                                                        db_salt_component: [
-                                                            // This value was generated from a secure PRNG.
-                                                            0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                                                            0xfe, 0x39, 0x01, 0x8a,
-                                                        ],
-                                                    };
-                                                    
-                                                    let hash_pswd = db.generate_hash_password(&user);
-        
-                                                    client
-                                                        .execute(
-                                                        "UPDATE users SET (name, pswd, email, role) VALUES ($1, $2, $3, $4) WHERE id = $5",
-                                                        &[&user.name, &hash_pswd, &user.email, &"user".to_string(), &actual_id],
-                                                    )
-                                                    .unwrap();
-        
-                                                    (OK_RESPONSE.to_string(), "User updated".to_string())
-                                                } else {
+                                // изменяет кого-то
+                                match client.query_one("SELECT EXISTS(SELECT users.id FROM users WHERE users.id = $1)",
+                                    &[&get_id]) {
+                                    Ok(check_id) => {  
+                                        let user_id_presence: bool = check_id.get(0);
+
+                                        if user_id_presence {
+                                            // 1-ое для проверки, чтобы не поменяли на тот же email, 2-ое для получения email пользователя
+                                            match (client.query_one("SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)", 
+                                                &[&user.email]), 
+                                                client.query_one("SELECT users.email FROM users WHERE users.id = $1", &[&get_id]),
+                                            ) {
+                                                (Ok(check_email), Ok(get_email)) => {
+                                                    let user_email_presence: bool = check_email.get(0);
+                                                    let get_user_email: String = get_email.get(0);
+
+                                                    match (user_email_presence, get_user_email) {
+                                                        (presence_email, actual_email) if presence_email && actual_email == user.email.clone().unwrap() => {
+                                                            user_update(user, client, get_id)
+                                                        }
+                                                        (presence_email, actual_email) if presence_email == false => {
+                                                            user_update(user, client, get_id)
+                                                        }
+                                                        _ => {
+                                                            (
+                                                                OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                                                "This email is already taken".to_string(),
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                _ => {
                                                     (
                                                         OK_RESPONSE.to_string(), // изменить на другу ошибку
-                                                        "This email is already taken".to_string(),
+                                                        "Error creating initial table".to_string(),
                                                     )
                                                 }
-                                            } else {
-                                                let mut db = PasswordForDatabase {
-                                                    pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                                                    db_salt_component: [
-                                                        // This value was generated from a secure PRNG.
-                                                        0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                                                        0xfe, 0x39, 0x01, 0x8a,
-                                                    ],
-                                                };
-        
-                                                let hash_pswd = db.generate_hash_password(&user);
-        
-                                                client
-                                                    .execute(
-                                                    "UPDATE users SET (name, pswd, email, role) VALUES ($1, $2, $3, $4) WHERE id = $5",
-                                                    &[&user.name, &hash_pswd, &user.email, &"user".to_string(), &actual_id],
-                                                )
-                                                .unwrap();
-        
-                                                (OK_RESPONSE.to_string(), "User updated".to_string())
                                             }
-                                        }
-                                        _ => {
+                                        } else {
                                             (
                                                 OK_RESPONSE.to_string(), // изменить на другу ошибку
-                                                "Error creating initial table".to_string(),
+                                                "There is no user with this id".to_string(),
                                             )
                                         }
                                     }
-                                } else {
-                                    match client.query_one(
-                                        "SELECT EXISTS(SELECT users.id FROM users WHERE users.id = $1)",
-                                        &[&get_id]) {
-                                        Ok(check_id) => {
-                                            let user_id_presence: bool = check_id.get(0);
-                                            if user_id_presence == true {
-                                                let mut db = PasswordForDatabase {
-                                                    pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                                                    db_salt_component: [
-                                                        // This value was generated from a secure PRNG.
-                                                        0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                                                        0xfe, 0x39, 0x01, 0x8a,
-                                                    ],
-                                                };
-                                                
-                                                let hash_pswd = db.generate_hash_password(&user);
-    
-                                                client
-                                                    .execute(
-                                                    "UPDATE users SET (name, pswd, email, role) VALUES ($1, $2, $3, $4) WHERE id = $5",
-                                                    &[&user.name, &hash_pswd, &user.email, &"user".to_string(), &get_id],
-                                                )
-                                                .unwrap();
-    
-                                                (OK_RESPONSE.to_string(), "User updated".to_string())
-
-                                            } else {
-                                                (
-                                                    OK_RESPONSE.to_string(), // изменить на другу ошибку
-                                                    "There is no user with this id".to_string(),
-                                                )
-                                            }
-                                        }
-                                        _ => {
-                                            (
-                                                OK_RESPONSE.to_string(), // изменить на другу ошибку
-                                                "Error creating initial table".to_string(),
-                                            )
-                                        }
+                                    _ => {
+                                        (
+                                            OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                            "Error creating initial table".to_string(),
+                                        )
                                     }
                                 }
                             }
                             _ => {
-                                (
-                                    OK_RESPONSE.to_string(), // изменить на другу ошибку
-                                    "Some problem with request".to_string(),
-                                )
+                                // вроде хватит только выбора id т.к. это проверяет наличие пользователя
+                                // изменяем себя
+                                match (
+                                    client.query_one("SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)", 
+                                    &[&user.email]), 
+                                    client.query_one("SELECT users.id FROM users WHERE users.email = $1", 
+                                    &[&claims.sub]),) {
+                                    (Ok(check_email), Ok(get_id)) => {
+                                        let user_email_presence: bool = check_email.get(0);
+                                        let actual_id: i32 = get_id.get(0); 
+                                                // изменённый email и истинный email
+                                        if user.email != Some(claims.sub) {
+                                            if user_email_presence == false {
+                                                user_update(user, client, actual_id)
+                                            } else {
+                                                (
+                                                    OK_RESPONSE.to_string(), // изменить OK_RESPONSE на другу ошибку
+                                                    "This email is already taken".to_string(),
+                                                )
+                                            }
+                                        } else {
+                                            user_update(user, client, actual_id)
+                                        }
+                                    }
+                                    _ => {
+                                        (
+                                            OK_RESPONSE.to_string(), // изменить OK_RESPONSE на другу ошибку
+                                            "Error creating initial table".to_string(),
+                                        )
+                                    }
+                                }
                             }
                         }
-                    }
+                    },
                     _ => {
                         (
                             OK_RESPONSE.to_string(), // изменить на другу ошибку
                             "This role has no privileges".to_string(),
                         )
                     }
-                },
+                }
+            }
                 _ => {
                     (
                         OK_RESPONSE.to_string(), // изменить на другу ошибку
@@ -497,66 +425,8 @@ fn handle_put_request(request: &str) -> (String, String) {
                     )
                 }
             }
-
-            /*
-            match client.query_one(
-                "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
-                &[&user.email],
-            ) {
-                Ok(row) => {
-                    let mut db = PasswordForDatabase {
-                        pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                        db_salt_component: [
-                            // This value was generated from a secure PRNG.
-                            0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                            0xfe, 0x39, 0x01, 0x8a,
-                        ],
-                    };
-
-                    let user_presence: bool = row.get(0);
-                    if user_presence == false {
-                        let hash_pswd = db.generate_hash_password(&user);
-
-                        client
-                            .execute(
-                                "UPDATE users SET (name, pswd, email) VALUES ($1, $2, $3) WHERE id = $4",
-                                &[&user.name, &hash_pswd, &user.email, &id],
-                            )
-                            .unwrap();
-
-                        (OK_RESPONSE.to_string(), "User updated".to_string())
-                    } else {
-                        (
-                            OK_RESPONSE.to_string(), // изменить на другу ошибку
-                            "This email is already taken".to_string(),
-                        )
-                    }
-                }
-                _ => (
-                    NOT_FOUND_RESPONSE.to_string(),
-                    "Error creating initial table".to_string(),
-                ),
-            }
-            */
         }
         _ => {
-            // println!("Request: {}", request.clone());
-            // println!("---------------");
-            // let id = request
-            //     .clone()
-            //     .split("/")
-            //     .nth(2)
-            //     .unwrap_or_default()
-            //     .split_whitespace()
-            //     .next()
-            //     .unwrap_or_default();
-            // println!("Id: {}", id);
-            // println!("Request: {}", request.clone());
-            // println!("---------------");
-            // let user_info: serde_json::Value =
-            //     serde_json::from_str(request.clone().split("\r\n\r\n").last().unwrap_or_default())
-            //         .unwrap();
-            // println!("User info: {:?}", user_info);
             (
                 INTERNAL_SERVER_ERROR.to_string(),
                 "Internal Error".to_string(),
@@ -565,47 +435,56 @@ fn handle_put_request(request: &str) -> (String, String) {
     }
 }
 
+// добавить валидацию email и name
 fn handle_sign_up_request(request: &str) -> (String, String) {
     match (
         get_user_request_body(&request),
         Client::connect(DB_URL, NoTls),
     ) {
         (Ok(user), Ok(mut client)) => {
-            // println!("{:#?}", user);
-            // panic!();
-
-            match client.query_one(
+            match (
+                client.query_one(
                 "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
-                &[&user.email],
+                &[&user.email],),
+                client.query_one(
+                "SELECT EXISTS(SELECT users.name FROM users WHERE users.email = $1)",
+                &[&user.email],)
             ) {
-                Ok(row) => {
-                    let mut db = PasswordForDatabase {
-                        pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                        db_salt_component: [
-                            // This value was generated from a secure PRNG.
-                            0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                            0xfe, 0x39, 0x01, 0x8a,
-                        ],
-                    };
+                (Ok(check_email), Ok(check_name)) => {
+                    let user_email_presence: bool = check_email.get(0);
+                    let user_name_presence: bool = check_name.get(0);
 
-                    let user_email_presence: bool = row.get(0);
-                    if user_email_presence == false {
-                        // генерируем хеш ключ и заносим в бд
-                        let hash_pswd = db.generate_hash_password(&user);
+                    match (user_email_presence, user_name_presence) {
+                        (email_presence, name_presence) if email_presence == false && name_presence == false => {
+                            let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
 
-                        client
-                            .execute(
-                                "INSERT INTO users (name, pswd, email, role) VALUES ($1, $2, $3, $4)",
-                                &[&user.name, &hash_pswd, &user.email, &"user".to_string()],
+                            client
+                                .execute(
+                                    "INSERT INTO users (name, pswd, email, role) VALUES ($1, $2, $3, $4)",
+                                    &[&user.name, &hash_pswd, &user.email, &"user".to_string()],
+                                )
+                                .unwrap();
+
+                            (OK_RESPONSE.to_string(), "User registered".to_string())
+                        },
+                        (email_presence, name_presence) if email_presence == false && name_presence => {
+                            (
+                                OK_RESPONSE.to_string(),
+                                "This name is already taken".to_string(),
                             )
-                            .unwrap();
-
-                        (OK_RESPONSE.to_string(), "User registered".to_string())
-                    } else {
-                        (
-                            OK_RESPONSE.to_string(),
-                            "This email is already taken".to_string(),
-                        )
+                        },
+                        (email_presence, name_presence) if email_presence && name_presence == false => {
+                            (
+                                OK_RESPONSE.to_string(),
+                                "This email is already taken".to_string(),
+                            )
+                        },
+                        _ => {
+                            (
+                                OK_RESPONSE.to_string(),
+                                "This email and name is already taken".to_string(),
+                            )
+                        }                        
                     }
                 }
                 _ => (
@@ -627,45 +506,38 @@ fn handle_sign_in_request(request: &str) -> (String, String) {
         Client::connect(DB_URL, NoTls),
     ) {
         (Ok(mut user), Ok(mut client)) => {
-            user.role = Some("user".to_string());
             match client.query_one(
                 "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                 &[&user.email],
+                
             ) {
-                Ok(row) => {
-                    let db = PasswordForDatabase {
-                        pbkdf2_iterations: NonZeroU32::new(100_000).unwrap(),
-                        db_salt_component: [
-                            // Нужно задать новый db_salt_component и вынести за запросы                     !!!!
-                            // This value was generated from a secure PRNG.
-                            0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1,
-                            0xfe, 0x39, 0x01, 0x8a,
-                        ],
-                    };
+                Ok(email_presence) => {
+                    let user_email_presence: bool = email_presence.get(0);
 
-                    let user_email_presence: bool = row.get(0);
-                    if user_email_presence == true {
-                        let verification = db.verify_password(&user, &mut client);
-
-                        if verification == true {
-                            // create jws token
-                            let token = Claims::create_jwt_token(&user); // нужно ли делать проверку, создался ли токен?
-
-                            // let role = Claims::verify_token(&token, &user);
-
-                            // (
-                            //     OK_RESPONSE.to_string(),
-                            //     "Token :".to_string() + token.as_str(),
-                            // )
-                            (
-                                OK_RESPONSE.to_string(),
-                                "Token: ".to_string() + token.as_str(),
-                            )
-                        } else {
-                            (
-                                OK_RESPONSE.to_string(),
-                                "Wrong email or password".to_string(),
-                            )
+                    if user_email_presence {
+                        match client.query_one("SELECT users.role FROM users WHERE users.email = $1", &[&user.email]) {
+                            Ok(user_role) => {
+                                user.role = Some(user_role.get(0));
+                                
+                                let verification_complete = PasswordForDatabase::verify_password(&user, &mut client);
+    
+                                if verification_complete {
+                                    let token = Claims::create_jwt_token(&user); // нужно ли делать проверку, создался ли токен?
+                                    (
+                                        OK_RESPONSE.to_string(),
+                                        "Token: ".to_string() + token.as_str(),
+                                    )
+                                } else {
+                                    (
+                                        OK_RESPONSE.to_string(),
+                                        "Wrong email or password".to_string(),
+                                    )
+                                }
+                            }
+                            _ => {(
+                                OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                "Trouble getting role".to_string(),
+                            )}
                         }
                     } else {
                         (
