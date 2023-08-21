@@ -393,6 +393,7 @@ fn handle_put_request(request: &str) -> (String, String) {
             match client.query_one(
                 "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                 &[&user.email],
+
             ) {
                 Ok(row) => {
                     let mut db = PasswordForDatabase {
