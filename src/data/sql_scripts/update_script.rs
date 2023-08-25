@@ -1,13 +1,13 @@
 pub const UPDATE_USER_SCRIPT: &str = r#"
 UPDATE public.users
-	SET (pswd, email) = ($1, $2)
-	WHERE id_user = $3;
+	SET (pswd, email) = ($2, $3)
+	WHERE id_user = $1;
 "#;
 
 pub const UPDATE_USER_INFO_SCRIPT: &str = r#"
 UPDATE public.user_info
-	SET (nickname, training_complete) = ($1, $2)
-	WHERE id_user = $3;
+	SET (nickname, training_complete) = ($2, $3)
+	WHERE id_user = $1;
 "#;
 
 pub const UPDATE_ACH_USER_SCRIPT: &str = r#"

@@ -1,6 +1,107 @@
+/*
+use serde::{Deserialize, Serialize};
+use serde_json::{Result, Value};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct User {
+    id: Option<i32>,
+    pswd: Option<String>,
+    email: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct User_info {
+    role: Option<String>,
+    name: Option<String>,
+    training_complete: Option<bool>,
+    mtx_lvl: Option<i16>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct User_ach {
+    ach_1: Option<bool>,
+    ach_2: Option<bool>,
+    ach_3: Option<bool>,
+    ach_4: Option<bool>,
+    ach_5: Option<bool>,
+}
+
+fn untyped_example() -> Result<()> {
+    // Some JSON input data as a &str. Maybe this comes from the user.
+    let data = r#"
+        {
+            "user": {
+                "pswd": "12345",
+                "email": "amil@gmail.com"
+            },
+            "user_info": {
+                "name": "amil",
+                "training_complete": true
+            },
+            "user_ach": {
+                "ach_4": true,
+                "ach_5": true
+            }
+        }"#;
+
+    // Parse the string of data into serde_json::Value.
+    let data_value: Value = serde_json::from_str(data)?;
+
+    let user = User {
+        id: None,
+        pswd: Some(data_value["user"]["pswd"].as_str().unwrap().to_string()),
+        email: Some(data_value["user"]["email"].as_str().unwrap().to_string()),
+    };
+    let user_info = User_info {
+        role: None,
+        name: Some(
+            data_value["user_info"]["name"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        ),
+        training_complete: Some(
+            data_value["user_info"]["training_complete"]
+                .as_bool()
+                .unwrap_or_default(),
+        ),
+        mtx_lvl: None,
+    };
+    let user_ach = User_ach {
+        ach_1: None,
+        ach_2: None,
+        ach_3: None,
+        ach_4: Some(
+            data_value["user_ach"]["ach_4"]
+                .as_bool()
+                .unwrap_or_default(),
+        ),
+        ach_5: Some(
+            data_value["user_ach"]["ach_5"]
+                .as_bool()
+                .unwrap_or_default(),
+        ),
+    };
+
+    // Access parts of the data by indexing with square brackets.
+    println!("{:?}", user);
+    println!("{:?}", user_info);
+    println!("{:?}", user_ach);
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    untyped_example()
+}
+*/
+
 use ring::{digest, pbkdf2};
+use serde_json::Value;
 
 use std::num::NonZeroU32;
+
+// use merge::Merge;
 
 // use std::fs::File;
 // use std::io::prelude::*;
@@ -9,8 +110,8 @@ use std::num::NonZeroU32;
 // у меня проект в паке rs_crud, хоть в гите и по другому
 use ::rs_crud::data::sql_scripts::{
     CREATE_DIAG, INSERT_ACH_USER_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
-    SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT, UPDATE_ACH_USER_SCRIPT, UPDATE_USER_INFO_SCRIPT,
-    UPDATE_USER_SCRIPT,
+    SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT, SELECT_USER_ACH_SCRIPT, UPDATE_ACH_USER_SCRIPT,
+    UPDATE_USER_INFO_SCRIPT, UPDATE_USER_SCRIPT,
 };
 
 use data_encoding::HEXUPPER;
@@ -54,7 +155,7 @@ mod jwt_numeric_date {
         serializer.serialize_i64(timestamp)
     }
 
-    /// Attempts to deserialize an i64 and use as a Unix timestamp
+    /// Attempts to deserialize an i32 and use as a Unix timestamp
     pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
     where
         D: Deserializer<'de>,
@@ -66,12 +167,30 @@ mod jwt_numeric_date {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct User {
-    id: Option<i32>,
-    role: Option<String>,
-    name: Option<String>,
+    id: Option<i64>,
     pswd: Option<String>,
     email: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+struct UserInfo {
+    role: Option<String>,
+    name: Option<String>,
+    training_complete: Option<bool>,
+    mtx_lvl: Option<i16>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct UserAch {
+    ach: Option<Vec<bool>>,
+}
+
+// #[derive(Serialize, Deserialize, Debug)]
+// struct User_create {
+//     user: User,
+//     user_info: User_info,
+//     user_ach: User_ach,
+// }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -87,7 +206,7 @@ struct Claims {
 
 impl Claims {
     // Проверка JWT
-    pub fn verify_token(token: &str, _user: &User) -> Result<Claims, std::io::Error> {
+    pub fn verify_token(token: &str) -> Result<Claims, std::io::Error> {
         let decoding_key = DecodingKey::from_secret(KEY.as_bytes());
         let validation = Validation::new(Algorithm::HS512);
 
@@ -104,14 +223,14 @@ impl Claims {
     }
 
     // если меняется одно из aud(email), pswd, role то создаём заново токен для пользователя
-    pub fn create_jwt_token(user: &User) -> String {
+    pub fn create_jwt_token(user: &User, user_info: &UserInfo) -> String {
         let my_claims = Claims {
             sub: user.email.clone().unwrap().to_owned(),
             // aud: user.email.clone().unwrap().to_owned(),
             iat: OffsetDateTime::now_utc(),
             exp: OffsetDateTime::now_utc() + Duration::days(1),
             pswd: user.pswd.clone().unwrap().to_owned(),
-            role: user.role.clone().unwrap().to_owned(),
+            role: user_info.role.clone().unwrap().to_owned(),
         };
 
         let header = Header {
@@ -192,16 +311,6 @@ fn set_database() -> Result<(), PostgresError> {
     let mut client = Client::connect(DB_URL, NoTls)?;
 
     client.batch_execute(CREATE_DIAG)?;
-
-    // client.batch_execute(
-    //     "CREATE TABLE IF NOT EXISTS users (
-    //         id SERIAL PRIMARY KEY,
-    //         name VARCHAR NOT NULL,
-    //         pswd VARCHAR NOT NULL,
-    //         email VARCHAR NOT NULL,
-    //         role  VARCHAR NOT NULL
-    //     )",
-    // )?;
     Ok(())
 }
 
@@ -220,8 +329,53 @@ fn get_token_from_request(request: &str) -> Result<&str, std::io::Error> {
     Ok(token)
 }
 
-fn get_user_request_body(request: &str) -> Result<User, serde_json::Error> {
-    serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())
+fn get_user_request_body(request: &str) -> Result<(User, UserInfo, UserAch), serde_json::Error> {
+    let data_value: Value =
+        serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())?;
+
+    let user = User {
+        id: Some(data_value["user"]["id"].as_i64().unwrap_or_default()),
+        pswd: Some(
+            data_value["user"]["pswd"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ),
+        email: Some(
+            data_value["user"]["email"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ),
+    };
+
+    let user_info = UserInfo {
+        role: None,
+        name: Some(
+            data_value["user_info"]["name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ),
+        training_complete: Some(
+            data_value["user_info"]["training_complete"]
+                .as_bool()
+                .unwrap_or_default(),
+        ),
+        mtx_lvl: None,
+    };
+
+    let mut request_ach: Vec<bool> = Vec::new();
+    request_ach.push(data_value["user_ach"][0].as_bool().unwrap_or_default());
+    request_ach.push(data_value["user_ach"][1].as_bool().unwrap_or_default());
+    request_ach.push(data_value["user_ach"][2].as_bool().unwrap_or_default());
+    request_ach.push(data_value["user_ach"][3].as_bool().unwrap_or_default());
+    request_ach.push(data_value["user_ach"][4].as_bool().unwrap_or_default());
+
+    let user_ach = UserAch {
+        ach: Some(request_ach),
+    };
+    Ok((user, user_info, user_ach))
 }
 
 fn main() {
@@ -259,6 +413,8 @@ fn handle_client(mut stream: TcpStream) {
                 r if r.starts_with("POST /sign_up") => handle_sign_up_request(r),
                 r if r.starts_with("POST /sign_in") => handle_sign_in_request(r),
                 r if r.starts_with("PUT /users/") => handle_put_request(r),
+                r if r.starts_with("GET /users/") => handle_get_request(r),
+                r if r.starts_with("DELETE /users/") => handle_delete_request(r),
                 _ => (
                     NOT_FOUND_RESPONSE.to_string(),
                     "Not found response".to_string(),
@@ -275,28 +431,75 @@ fn handle_client(mut stream: TcpStream) {
     }
 }
 
-fn user_update(user: User, mut client: Client, actual_id: i32) -> (String, String) {
+fn handle_get_request(request: &str) -> (String, String) {
+    ("ha".to_string(), "ha".to_string())
+}
+
+fn handle_delete_request(request: &str) -> (String, String) {
+    ("ha".to_string(), "ha".to_string())
+}
+
+fn get_user_ach(client: &mut Client, actual_id: i32) -> Result<Vec<bool>, PostgresError> {
+    match client.query_one(SELECT_USER_ACH_SCRIPT, &[&actual_id]) {
+        Ok(db_data_ach) => {
+            let mut db_user_ach: Vec<bool> = Vec::new();
+            db_user_ach.push(db_data_ach.get(0));
+            db_user_ach.push(db_data_ach.get(1));
+            db_user_ach.push(db_data_ach.get(2));
+            db_user_ach.push(db_data_ach.get(3));
+            db_user_ach.push(db_data_ach.get(4));
+            Ok(db_user_ach)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn user_update(
+    user: User,
+    user_info: UserInfo,
+    mut user_ach: UserAch,
+    mut client: &mut Client,
+    actual_id: i32,
+) -> (String, String) {
     let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
 
     client
-        .execute(UPDATE_USER_SCRIPT, &[&hash_pswd, &user.email, &actual_id])
+        .execute(UPDATE_USER_SCRIPT, &[&actual_id, &hash_pswd, &user.email])
         .unwrap();
-    client
-        .execute(UPDATE_USER_INFO_SCRIPT, &[&user.name, &true, &actual_id])
-        .unwrap();
+    // для info_user
     client
         .execute(
-            UPDATE_ACH_USER_SCRIPT,
-            &[&actual_id, &true, &true, &true, &true, &true],
+            UPDATE_USER_INFO_SCRIPT,
+            &[&actual_id, &user_info.name, &user_info.training_complete],
         )
         .unwrap();
 
-    // client
-    //     .execute(
-    //         &"UPDATE users SET (name, pswd, email) = ($1, $2, $3) WHERE id = $4",
-    //         &[&user.name, &hash_pswd, &user.email, &actual_id],
-    //     )
-    //     .unwrap();
+    // для user_ach
+    let mut data_ach: Vec<bool> = Vec::new();
+    let mut update_user_ach = user_ach.ach.clone().unwrap_or_default().into_iter();
+    let db_user_ach = get_user_ach(client, actual_id).unwrap_or_default();
+
+    for actual_user_ach in db_user_ach {
+        if (actual_user_ach || update_user_ach.next().unwrap_or_default()) == true {
+            data_ach.push(true);
+        } else {
+            data_ach.push(false);
+        }
+    }
+
+    client
+        .execute(
+            UPDATE_ACH_USER_SCRIPT,
+            &[
+                &actual_id,
+                &data_ach[0],
+                &data_ach[1],
+                &data_ach[2],
+                &data_ach[3],
+                &data_ach[4],
+            ],
+        )
+        .unwrap();
 
     (OK_RESPONSE.to_string(), "User updated".to_string())
 }
@@ -308,8 +511,8 @@ fn handle_put_request(request: &str) -> (String, String) {
         get_token_from_request(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok(user), Ok(token), Ok(mut client)) => {
-            match Claims::verify_token(token, &user) {
+        (Ok((user, user_info, user_ach)), Ok(token), Ok(mut client)) => {
+            match Claims::verify_token(token) {
                 Ok(claims) => {
                     // возможно изменить на получение роли из бд
                     match claims.role {
@@ -326,7 +529,7 @@ fn handle_put_request(request: &str) -> (String, String) {
 
                                     if user.email != Some(claims.sub) {
                                         if user_email_presence == false {
-                                            user_update(user, client, actual_id)
+                                            user_update(user, user_info, user_ach, &mut client, actual_id)
                                         } else {
                                             (
                                                 OK_RESPONSE.to_string(), // изменить на другу ошибку
@@ -334,7 +537,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                             )
                                         }
                                     } else {
-                                        user_update(user, client, actual_id)
+                                        user_update(user, user_info, user_ach, &mut client, actual_id)
                                     }
                                 }
                                 _ => {
@@ -366,10 +569,10 @@ fn handle_put_request(request: &str) -> (String, String) {
 
                                                     match (user_email_presence, get_user_email) {
                                                         (presence_email, actual_email) if presence_email && actual_email == user.email.clone().unwrap() => {
-                                                            user_update(user, client, get_id)
+                                                            user_update(user, user_info, user_ach, &mut client, get_id)
                                                         }
                                                         (presence_email, _actual_email) if presence_email == false => {
-                                                            user_update(user, client, get_id)
+                                                            user_update(user, user_info, user_ach, &mut client, get_id)
                                                         }
                                                         _ => {
                                                             (
@@ -402,8 +605,6 @@ fn handle_put_request(request: &str) -> (String, String) {
                                 }
                                 }
                                 _ => {
-                                    // вроде хватит только выбора id т.к. это проверяет наличие пользователя
-                                    // изменяем себя
                                     match (
                                     client.query_one("SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                                     &[&user.email]),
@@ -415,7 +616,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                                 // изменённый email и истинный email
                                         if user.email != Some(claims.sub) {
                                             if user_email_presence == false {
-                                                user_update(user, client, actual_id)
+                                                user_update(user, user_info, user_ach, &mut client, actual_id)
                                             } else {
                                                 (
                                                     OK_RESPONSE.to_string(), // изменить OK_RESPONSE на другу ошибку
@@ -423,7 +624,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                                 )
                                             }
                                         } else {
-                                            user_update(user, client, actual_id)
+                                            user_update(user, user_info, user_ach, &mut client, actual_id)
                                         }
                                     }
                                     _ => {
@@ -465,7 +666,7 @@ fn handle_sign_up_request(request: &str) -> (String, String) {
         get_user_request_body(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok(user), Ok(mut client)) => {
+        (Ok((user, user_info, _user_ach)), Ok(mut client)) => {
             match (
                 client.query_one(
                     "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
@@ -487,7 +688,7 @@ fn handle_sign_up_request(request: &str) -> (String, String) {
                                 .execute(INSERT_USER_SCRIPT, &[&hash_pswd, &user.email])
                                 .unwrap();
                             client
-                                .execute(INSERT_USER_INFO_SCRIPT, &[&user.email, &user.name])
+                                .execute(INSERT_USER_INFO_SCRIPT, &[&user.email, &user_info.name])
                                 .unwrap();
                             client
                                 .execute(INSERT_ACH_USER_SCRIPT, &[&user.email])
@@ -541,7 +742,7 @@ fn handle_sign_in_request(request: &str) -> (String, String) {
         get_user_request_body(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok(mut user), Ok(mut client)) => {
+        (Ok((user, mut user_info, _user_ach)), Ok(mut client)) => {
             match client.query_one(
                 "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                 &[&user.email],
@@ -552,13 +753,13 @@ fn handle_sign_in_request(request: &str) -> (String, String) {
                     if user_email_presence {
                         match client.query_one(SELECT_ROLE_SCRIPT, &[&user.email]) {
                             Ok(user_role) => {
-                                user.role = Some(user_role.get(0));
+                                user_info.role = Some(user_role.get(0));
 
                                 let verification_complete =
                                     PasswordForDatabase::verify_password(&user, &mut client);
 
                                 if verification_complete {
-                                    let token = Claims::create_jwt_token(&user); // нужно ли делать проверку, создался ли токен?
+                                    let token = Claims::create_jwt_token(&user, &user_info); // нужно ли делать проверку, создался ли токен?
                                     (
                                         OK_RESPONSE.to_string(),
                                         "Token: ".to_string() + token.as_str(),
