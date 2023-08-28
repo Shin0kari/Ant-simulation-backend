@@ -18,3 +18,15 @@ SELECT ach_one, ach_two, ach_three, ach_four, ach_five
 	FROM public.achievments_user
 	WHERE id_user = $1;
 "#;
+
+pub const SELECT_USER_SCRIPT: &str = r#"
+SELECT id_user, pswd, email
+	FROM public.users
+    WHERE id_user = $1;
+"#;
+
+pub const SELECT_USER_INFO_SCRIPT: &str = r#"
+SELECT nickname, role, training_complete, mtx_lvl_access
+	FROM public.user_info
+    WHERE id_user = $1;
+"#;

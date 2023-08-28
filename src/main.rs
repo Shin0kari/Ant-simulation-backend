@@ -1,99 +1,36 @@
 /*
-use serde::{Deserialize, Serialize};
-use serde_json::{Result, Value};
-
-#[derive(Serialize, Deserialize, Debug)]
-struct User {
-    id: Option<i32>,
-    pswd: Option<String>,
-    email: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct User_info {
+#[derive(Debug)]
+struct UserInfo {
     role: Option<String>,
     name: Option<String>,
     training_complete: Option<bool>,
     mtx_lvl: Option<i16>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct User_ach {
-    ach_1: Option<bool>,
-    ach_2: Option<bool>,
-    ach_3: Option<bool>,
-    ach_4: Option<bool>,
-    ach_5: Option<bool>,
+fn get_user_info() -> UserInfo {
+    let role = Some("user".to_string());
+    let username = Some("Kekv".to_string());
+    let training_complete = Some(false);
+    let mtx_lvl = Some(1);
+    UserInfo {
+        role,
+        name: username,
+        training_complete,
+        mtx_lvl,
+    }
 }
 
-fn untyped_example() -> Result<()> {
-    // Some JSON input data as a &str. Maybe this comes from the user.
-    let data = r#"
-        {
-            "user": {
-                "pswd": "12345",
-                "email": "amil@gmail.com"
-            },
-            "user_info": {
-                "name": "amil",
-                "training_complete": true
-            },
-            "user_ach": {
-                "ach_4": true,
-                "ach_5": true
-            }
-        }"#;
-
-    // Parse the string of data into serde_json::Value.
-    let data_value: Value = serde_json::from_str(data)?;
-
-    let user = User {
-        id: None,
-        pswd: Some(data_value["user"]["pswd"].as_str().unwrap().to_string()),
-        email: Some(data_value["user"]["email"].as_str().unwrap().to_string()),
-    };
-    let user_info = User_info {
-        role: None,
-        name: Some(
-            data_value["user_info"]["name"]
-                .as_str()
-                .unwrap()
-                .to_string(),
-        ),
-        training_complete: Some(
-            data_value["user_info"]["training_complete"]
-                .as_bool()
-                .unwrap_or_default(),
-        ),
-        mtx_lvl: None,
-    };
-    let user_ach = User_ach {
-        ach_1: None,
-        ach_2: None,
-        ach_3: None,
-        ach_4: Some(
-            data_value["user_ach"]["ach_4"]
-                .as_bool()
-                .unwrap_or_default(),
-        ),
-        ach_5: Some(
-            data_value["user_ach"]["ach_5"]
-                .as_bool()
-                .unwrap_or_default(),
-        ),
-    };
-
-    // Access parts of the data by indexing with square brackets.
-    println!("{:?}", user);
-    println!("{:?}", user_info);
-    println!("{:?}", user_ach);
-
-    Ok(())
+fn main() {
+    match get_user_info() {
+        user => {
+            println!("{:?}", user)
+        }
+        _ => {
+            panic!("Error")
+        }
+    }
 }
 
-fn main() -> Result<()> {
-    untyped_example()
-}
 */
 
 use ring::{digest, pbkdf2};
@@ -101,17 +38,12 @@ use serde_json::Value;
 
 use std::num::NonZeroU32;
 
-// use merge::Merge;
-
-// use std::fs::File;
-// use std::io::prelude::*;
-// use std::io::BufReader;
-
 // у меня проект в паке rs_crud, хоть в гите и по другому
 use ::rs_crud::data::sql_scripts::{
-    CREATE_DIAG, INSERT_ACH_USER_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
-    SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT, SELECT_USER_ACH_SCRIPT, UPDATE_ACH_USER_SCRIPT,
-    UPDATE_USER_INFO_SCRIPT, UPDATE_USER_SCRIPT,
+    CREATE_DIAG, DELETE_FRIEND_LIST_SCRIPT, DELETE_USER_ACH_SCRIPT, DELETE_USER_INFO_SCRIPT,
+    DELETE_USER_SCRIPT, INSERT_ACH_USER_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
+    SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT, SELECT_USER_ACH_SCRIPT, SELECT_USER_INFO_SCRIPT,
+    SELECT_USER_SCRIPT, UPDATE_ACH_USER_SCRIPT, UPDATE_USER_INFO_SCRIPT, UPDATE_USER_SCRIPT,
 };
 
 use data_encoding::HEXUPPER;
@@ -167,7 +99,7 @@ mod jwt_numeric_date {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct User {
-    id: Option<i64>,
+    id: Option<i32>,
     pswd: Option<String>,
     email: Option<String>,
 }
@@ -184,13 +116,6 @@ struct UserInfo {
 struct UserAch {
     ach: Option<Vec<bool>>,
 }
-
-// #[derive(Serialize, Deserialize, Debug)]
-// struct User_create {
-//     user: User,
-//     user_info: User_info,
-//     user_ach: User_ach,
-// }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -306,7 +231,6 @@ impl PasswordForDatabase {
     }
 }
 
-// изменить структуру до готовой и добавить создание суперюзеров?
 fn set_database() -> Result<(), PostgresError> {
     let mut client = Client::connect(DB_URL, NoTls)?;
 
@@ -334,7 +258,14 @@ fn get_user_request_body(request: &str) -> Result<(User, UserInfo, UserAch), ser
         serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())?;
 
     let user = User {
-        id: Some(data_value["user"]["id"].as_i64().unwrap_or_default()),
+        id: Some(
+            data_value["user"]["id"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string()
+                .parse::<i32>()
+                .unwrap_or_default(),
+        ),
         pswd: Some(
             data_value["user"]["pswd"]
                 .as_str()
@@ -431,29 +362,6 @@ fn handle_client(mut stream: TcpStream) {
     }
 }
 
-fn handle_get_request(request: &str) -> (String, String) {
-    ("ha".to_string(), "ha".to_string())
-}
-
-fn handle_delete_request(request: &str) -> (String, String) {
-    ("ha".to_string(), "ha".to_string())
-}
-
-fn get_user_ach(client: &mut Client, actual_id: i32) -> Result<Vec<bool>, PostgresError> {
-    match client.query_one(SELECT_USER_ACH_SCRIPT, &[&actual_id]) {
-        Ok(db_data_ach) => {
-            let mut db_user_ach: Vec<bool> = Vec::new();
-            db_user_ach.push(db_data_ach.get(0));
-            db_user_ach.push(db_data_ach.get(1));
-            db_user_ach.push(db_data_ach.get(2));
-            db_user_ach.push(db_data_ach.get(3));
-            db_user_ach.push(db_data_ach.get(4));
-            Ok(db_user_ach)
-        }
-        Err(error) => Err(error),
-    }
-}
-
 fn user_update(
     user: User,
     user_info: UserInfo,
@@ -477,31 +385,297 @@ fn user_update(
     // для user_ach
     let mut data_ach: Vec<bool> = Vec::new();
     let mut update_user_ach = user_ach.ach.clone().unwrap_or_default().into_iter();
-    let db_user_ach = get_user_ach(client, actual_id).unwrap_or_default();
 
-    for actual_user_ach in db_user_ach {
-        if (actual_user_ach || update_user_ach.next().unwrap_or_default()) == true {
-            data_ach.push(true);
-        } else {
-            data_ach.push(false);
+    match get_user_ach(actual_id, client) {
+        Ok(db_user_ach) => {
+            for actual_user_ach in db_user_ach.ach.unwrap_or_default() {
+                if (actual_user_ach || update_user_ach.next().unwrap_or_default()) == true {
+                    data_ach.push(true);
+                } else {
+                    data_ach.push(false);
+                }
+            }
+
+            client
+                .execute(
+                    UPDATE_ACH_USER_SCRIPT,
+                    &[
+                        &actual_id,
+                        &data_ach[0],
+                        &data_ach[1],
+                        &data_ach[2],
+                        &data_ach[3],
+                        &data_ach[4],
+                    ],
+                )
+                .unwrap();
+
+            (OK_RESPONSE.to_string(), "User update".to_string())
         }
+        Err(error) => (
+            OK_RESPONSE.to_string(),
+            ("Error update user: ".to_string() + error.to_string().as_str()),
+        ),
     }
+}
 
-    client
-        .execute(
-            UPDATE_ACH_USER_SCRIPT,
-            &[
-                &actual_id,
-                &data_ach[0],
-                &data_ach[1],
-                &data_ach[2],
-                &data_ach[3],
-                &data_ach[4],
-            ],
-        )
-        .unwrap();
+fn select_user_data(
+    actual_id: i32,
+    client: &mut Client,
+) -> Result<(User, UserInfo, UserAch), PostgresError> {
+    match (
+        get_user(actual_id, client),
+        get_user_info(actual_id, client),
+        get_user_ach(actual_id, client),
+    ) {
+        (Ok(user), Ok(user_info), Ok(user_ach)) => Ok((user, user_info, user_ach)),
+        _ => panic!("Something to add"),
+    }
+}
 
-    (OK_RESPONSE.to_string(), "User updated".to_string())
+fn get_user_ach(actual_id: i32, client: &mut Client) -> Result<UserAch, PostgresError> {
+    match client.query_one(SELECT_USER_ACH_SCRIPT, &[&actual_id]) {
+        Ok(db_data) => {
+            let mut data_ach: Vec<bool> = Vec::new();
+
+            for i in 0..db_data.len() {
+                data_ach.push(db_data.get(i));
+            }
+
+            Ok(UserAch {
+                ach: Some(data_ach),
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn get_user(actual_id: i32, client: &mut Client) -> Result<User, PostgresError> {
+    match client.query_one(SELECT_USER_SCRIPT, &[&actual_id]) {
+        Ok(db_data) => Ok(User {
+            id: Some(db_data.get(0)),
+            pswd: Some(db_data.get(1)),
+            email: Some(db_data.get(2)),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+fn get_user_info(actual_id: i32, client: &mut Client) -> Result<UserInfo, PostgresError> {
+    match client.query_one(SELECT_USER_INFO_SCRIPT, &[&actual_id]) {
+        Ok(db_data) => Ok(UserInfo {
+            role: Some(db_data.get(0)),
+            name: Some(db_data.get(1)),
+            training_complete: Some(db_data.get(2)),
+            mtx_lvl: Some(db_data.get(3)),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_user(mut client: Client, actual_id: i32) -> (String, String) {
+    match select_user_data(actual_id, &mut client) {
+        Ok((user, user_info, user_ach)) => {
+            let mut ach_str = "".to_string();
+            for ach in user_ach.ach.unwrap().iter() {
+                if *ach {
+                    ach_str = ach_str + "true "
+                } else {
+                    ach_str = ach_str + "false "
+                }
+            }
+            (
+                OK_RESPONSE.to_string(), // изменить на другу ошибку
+                "User: ".to_string()
+                    + "\nid: = "
+                    + user.id.unwrap().to_string().as_str()
+                    + "\nemail: = "
+                    + user.email.unwrap().as_str()
+                    + "\n\nUser_info: "
+                    + "\nname: "
+                    + user_info.name.unwrap().as_str()
+                    + "\nrole: "
+                    + user_info.role.unwrap().as_str()
+                    + "\ntraining complete: "
+                    + user_info.training_complete.unwrap().to_string().as_str()
+                    + "\nmtx_lvl: "
+                    + user_info.mtx_lvl.unwrap().to_string().as_str()
+                    + "\n\nUser_ach: "
+                    + "\nach: "
+                    + &ach_str
+                    + ";\n",
+            )
+        }
+        Err(_) => (
+            OK_RESPONSE.to_string(), // изменить на другу ошибку
+            "Error initial one of struct".to_string(),
+        ),
+    }
+}
+
+fn handle_get_request(request: &str) -> (String, String) {
+    match (
+        get_token_from_request(&request),
+        Client::connect(DB_URL, NoTls),
+    ) {
+        (Ok(token), Ok(mut client)) => {
+            match Claims::verify_token(token) {
+                Ok(claims) => {
+                    match claims.role {
+                        r if r == "user".to_string() => {
+                            match client.query_one(
+                                "SELECT users.id_user FROM users WHERE users.email = $1",
+                                &[&claims.sub],
+                            ) {
+                                Ok(id) => {
+                                    let actual_id: i32 = id.get(0);
+                                    read_user(client, actual_id)
+                                }
+                                _ => {
+                                    (
+                                        OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                        "Error creating initial table or there is no user with this email".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        r if r == "admin".to_string() => {
+                            match get_id_from_request(&request).parse::<i32>() {
+                                Ok(get_id) => read_user(client, get_id),
+                                _ => {
+                                    match client.query_one(
+                                        "SELECT users.id_user FROM users WHERE users.email = $1",
+                                        &[&claims.sub],
+                                    ) {
+                                        Ok(get_id) => {
+                                            let actual_id: i32 = get_id.get(0);
+                                            read_user(client, actual_id)
+                                        }
+                                        _ => {
+                                            (
+                                                OK_RESPONSE.to_string(), // изменить OK_RESPONSE на другу ошибку
+                                                "Error creating initial table".to_string(),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            (
+                                OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                "This role has no privileges".to_string(),
+                            )
+                        }
+                    }
+                }
+                _ => {
+                    (
+                        OK_RESPONSE.to_string(), // изменить на другу ошибку
+                        "Token is invalid".to_string(),
+                    )
+                }
+            }
+        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            "Internal Error".to_string(),
+        ),
+    }
+}
+
+fn delete_user(mut client: Client, actual_id: i32) -> (String, String) {
+    match (
+        client.execute(DELETE_USER_INFO_SCRIPT, &[&actual_id]),
+        client.execute(DELETE_FRIEND_LIST_SCRIPT, &[&actual_id]),
+        client.execute(DELETE_USER_ACH_SCRIPT, &[&actual_id]),
+        client.execute(DELETE_USER_SCRIPT, &[&actual_id]),
+    ) {
+        (
+            Ok(delete_user_info_line),
+            Ok(delete_friend_list_line),
+            Ok(delete_user_ach_line),
+            Ok(delete_user_line),
+        ) => (
+            OK_RESPONSE.to_string(), // изменить на другу ошибку
+            "User deleted".to_string(),
+        ),
+        _ => (
+            OK_RESPONSE.to_string(), // изменить на другу ошибку
+            "Error initial one of struct".to_string(),
+        ),
+    }
+}
+
+fn handle_delete_request(request: &str) -> (String, String) {
+    match (
+        get_token_from_request(&request),
+        Client::connect(DB_URL, NoTls),
+    ) {
+        (Ok(token), Ok(mut client)) => {
+            match Claims::verify_token(token) {
+                Ok(claims) => {
+                    match claims.role {
+                        r if r == "user".to_string() => {
+                            match client.query_one(
+                                "SELECT users.id_user FROM users WHERE users.email = $1",
+                                &[&claims.sub],
+                            ) {
+                                Ok(id) => {
+                                    let actual_id: i32 = id.get(0);
+                                    delete_user(client, actual_id)
+                                }
+                                _ => {
+                                    (
+                                        OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                        "Error creating initial table or there is no user with this email".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        r if r == "admin".to_string() => {
+                            match get_id_from_request(&request).parse::<i32>() {
+                                Ok(get_id) => delete_user(client, get_id),
+                                _ => {
+                                    match client.query_one(
+                                        "SELECT users.id_user FROM users WHERE users.email = $1",
+                                        &[&claims.sub],
+                                    ) {
+                                        Ok(get_id) => {
+                                            let actual_id: i32 = get_id.get(0);
+                                            delete_user(client, actual_id)
+                                        }
+                                        _ => {
+                                            (
+                                                OK_RESPONSE.to_string(), // изменить OK_RESPONSE на другу ошибку
+                                                "Error creating initial table".to_string(),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            (
+                                OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                "This role has no privileges".to_string(),
+                            )
+                        }
+                    }
+                }
+                _ => {
+                    (
+                        OK_RESPONSE.to_string(), // изменить на другу ошибку
+                        "Token is invalid".to_string(),
+                    )
+                }
+            }
+        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            "Internal Error".to_string(),
+        ),
+    }
 }
 
 // добавить создание новых токенов
