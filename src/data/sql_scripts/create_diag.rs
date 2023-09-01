@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS public.friend_list
 (
     id_user integer NOT NULL,
     friend_id integer NOT NULL,
-    CONSTRAINT friend_list_pkey PRIMARY KEY (id_user),
     CONSTRAINT fk_friend_list FOREIGN KEY (id_user)
         REFERENCES public.users (id_user) MATCH SIMPLE
         ON UPDATE NO ACTION

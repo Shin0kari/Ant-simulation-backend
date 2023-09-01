@@ -1,38 +1,3 @@
-/*
-#[derive(Debug)]
-struct UserInfo {
-    role: Option<String>,
-    name: Option<String>,
-    training_complete: Option<bool>,
-    mtx_lvl: Option<i16>,
-}
-
-fn get_user_info() -> UserInfo {
-    let role = Some("user".to_string());
-    let username = Some("Kekv".to_string());
-    let training_complete = Some(false);
-    let mtx_lvl = Some(1);
-    UserInfo {
-        role,
-        name: username,
-        training_complete,
-        mtx_lvl,
-    }
-}
-
-fn main() {
-    match get_user_info() {
-        user => {
-            println!("{:?}", user)
-        }
-        _ => {
-            panic!("Error")
-        }
-    }
-}
-
-*/
-
 use ring::{digest, pbkdf2};
 use serde_json::Value;
 
@@ -41,9 +6,10 @@ use std::num::NonZeroU32;
 // у меня проект в паке rs_crud, хоть в гите и по другому
 use ::rs_crud::data::sql_scripts::{
     CREATE_DIAG, DELETE_FRIEND_LIST_SCRIPT, DELETE_USER_ACH_SCRIPT, DELETE_USER_INFO_SCRIPT,
-    DELETE_USER_SCRIPT, INSERT_ACH_USER_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
-    SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT, SELECT_USER_ACH_SCRIPT, SELECT_USER_INFO_SCRIPT,
-    SELECT_USER_SCRIPT, UPDATE_ACH_USER_SCRIPT, UPDATE_USER_INFO_SCRIPT, UPDATE_USER_SCRIPT,
+    DELETE_USER_SCRIPT, INSERT_ACH_USER_SCRIPT, INSERT_FRIEND_LIST_SCRIPT, INSERT_USER_INFO_SCRIPT,
+    INSERT_USER_SCRIPT, SELECT_FRIEND_LIST_SCRIPT, SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT,
+    SELECT_USER_ACH_SCRIPT, SELECT_USER_INFO_SCRIPT, SELECT_USER_SCRIPT, UPDATE_ACH_USER_SCRIPT,
+    UPDATE_USER_INFO_SCRIPT, UPDATE_USER_SCRIPT,
 };
 
 use data_encoding::HEXUPPER;
@@ -117,6 +83,12 @@ struct UserAch {
     ach: Option<Vec<bool>>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct UserListFriend {
+    frined_list: Option<Vec<i32>>,
+    friend_id: Option<i32>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     sub: String, // email
@@ -138,6 +110,7 @@ impl Claims {
         let token_data = match decode::<Claims>(&token, &decoding_key, &validation) {
             Ok(c) => c,
             Err(err) => match *err.kind() {
+                // сделать вывод ошибки
                 jsonwebtoken::errors::ErrorKind::InvalidToken => panic!("Token is invalid"), // Example on how to handle a specific error
                 jsonwebtoken::errors::ErrorKind::InvalidIssuer => panic!("Issuer is invalid"), // Example on how to handle a specific error
                 _ => panic!("Some other errors"),
@@ -253,7 +226,9 @@ fn get_token_from_request(request: &str) -> Result<&str, std::io::Error> {
     Ok(token)
 }
 
-fn get_user_request_body(request: &str) -> Result<(User, UserInfo, UserAch), serde_json::Error> {
+fn get_user_request_body(
+    request: &str,
+) -> Result<(User, UserInfo, UserAch, UserListFriend), serde_json::Error> {
     let data_value: Value =
         serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())?;
 
@@ -297,16 +272,35 @@ fn get_user_request_body(request: &str) -> Result<(User, UserInfo, UserAch), ser
     };
 
     let mut request_ach: Vec<bool> = Vec::new();
-    request_ach.push(data_value["user_ach"][0].as_bool().unwrap_or_default());
-    request_ach.push(data_value["user_ach"][1].as_bool().unwrap_or_default());
-    request_ach.push(data_value["user_ach"][2].as_bool().unwrap_or_default());
-    request_ach.push(data_value["user_ach"][3].as_bool().unwrap_or_default());
-    request_ach.push(data_value["user_ach"][4].as_bool().unwrap_or_default());
+
+    if data_value["user_ach"].clone().is_null() == false {
+        for i in 0..data_value["user_ach"]
+            .clone()
+            .as_array()
+            .expect("Somthink wrong with ach, the programmer will cry")
+            .len()
+        {
+            request_ach.push(data_value["user_ach"][i].as_bool().unwrap_or_default());
+        }
+    }
 
     let user_ach = UserAch {
         ach: Some(request_ach),
     };
-    Ok((user, user_info, user_ach))
+
+    let friend_list = UserListFriend {
+        frined_list: None,
+        friend_id: Some(
+            data_value["friend_id"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string()
+                .parse::<i32>()
+                .unwrap_or_default(),
+        ),
+    };
+
+    Ok((user, user_info, user_ach, friend_list))
 }
 
 fn main() {
@@ -344,6 +338,7 @@ fn handle_client(mut stream: TcpStream) {
                 r if r.starts_with("POST /sign_up") => handle_sign_up_request(r),
                 r if r.starts_with("POST /sign_in") => handle_sign_in_request(r),
                 r if r.starts_with("PUT /users/") => handle_put_request(r),
+                r if r.starts_with("POST /users/") => handle_add_friend_request(r),
                 r if r.starts_with("GET /users/") => handle_get_request(r),
                 r if r.starts_with("DELETE /users/") => handle_delete_request(r),
                 _ => (
@@ -362,15 +357,17 @@ fn handle_client(mut stream: TcpStream) {
     }
 }
 
-fn user_update(
+fn update_user(
     user: User,
     user_info: UserInfo,
-    mut user_ach: UserAch,
-    mut client: &mut Client,
+    user_ach: UserAch,
+    friend_list: UserListFriend,
+    client: &mut Client,
     actual_id: i32,
 ) -> (String, String) {
     let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
 
+    // для user
     client
         .execute(UPDATE_USER_SCRIPT, &[&actual_id, &hash_pswd, &user.email])
         .unwrap();
@@ -414,7 +411,7 @@ fn user_update(
         }
         Err(error) => (
             OK_RESPONSE.to_string(),
-            ("Error update user: ".to_string() + error.to_string().as_str()),
+            ("Error occurred while updating the user: ".to_string() + error.to_string().as_str()),
         ),
     }
 }
@@ -422,14 +419,35 @@ fn user_update(
 fn select_user_data(
     actual_id: i32,
     client: &mut Client,
-) -> Result<(User, UserInfo, UserAch), PostgresError> {
+) -> Result<(User, UserInfo, UserAch, UserListFriend), PostgresError> {
     match (
         get_user(actual_id, client),
         get_user_info(actual_id, client),
         get_user_ach(actual_id, client),
+        get_user_friends(actual_id, client),
     ) {
-        (Ok(user), Ok(user_info), Ok(user_ach)) => Ok((user, user_info, user_ach)),
-        _ => panic!("Something to add"),
+        (Ok(user), Ok(user_info), Ok(user_ach), Ok(friend_list)) => {
+            Ok((user, user_info, user_ach, friend_list))
+        }
+        _ => panic!("Something to add"), // изменить
+    }
+}
+
+fn get_user_friends(actual_id: i32, client: &mut Client) -> Result<UserListFriend, PostgresError> {
+    match client.query(SELECT_FRIEND_LIST_SCRIPT, &[&actual_id]) {
+        Ok(db_data) => {
+            let mut data_id_friends: Vec<i32> = Vec::new();
+
+            for id in db_data {
+                data_id_friends.push(id.get(0));
+            }
+
+            Ok(UserListFriend {
+                frined_list: Some(data_id_friends),
+                friend_id: None,
+            })
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -464,8 +482,8 @@ fn get_user(actual_id: i32, client: &mut Client) -> Result<User, PostgresError> 
 fn get_user_info(actual_id: i32, client: &mut Client) -> Result<UserInfo, PostgresError> {
     match client.query_one(SELECT_USER_INFO_SCRIPT, &[&actual_id]) {
         Ok(db_data) => Ok(UserInfo {
-            role: Some(db_data.get(0)),
-            name: Some(db_data.get(1)),
+            name: Some(db_data.get(0)),
+            role: Some(db_data.get(1)),
             training_complete: Some(db_data.get(2)),
             mtx_lvl: Some(db_data.get(3)),
         }),
@@ -475,7 +493,7 @@ fn get_user_info(actual_id: i32, client: &mut Client) -> Result<UserInfo, Postgr
 
 fn read_user(mut client: Client, actual_id: i32) -> (String, String) {
     match select_user_data(actual_id, &mut client) {
-        Ok((user, user_info, user_ach)) => {
+        Ok((user, user_info, user_ach, friend_list)) => {
             let mut ach_str = "".to_string();
             for ach in user_ach.ach.unwrap().iter() {
                 if *ach {
@@ -484,6 +502,12 @@ fn read_user(mut client: Client, actual_id: i32) -> (String, String) {
                     ach_str = ach_str + "false "
                 }
             }
+
+            let mut friends_id_str = "".to_string();
+            for id in friend_list.frined_list.unwrap() {
+                friends_id_str = friends_id_str + id.to_string().as_str() + " ";
+            }
+
             (
                 OK_RESPONSE.to_string(), // изменить на другу ошибку
                 "User: ".to_string()
@@ -503,7 +527,9 @@ fn read_user(mut client: Client, actual_id: i32) -> (String, String) {
                     + "\n\nUser_ach: "
                     + "\nach: "
                     + &ach_str
-                    + ";\n",
+                    + "\n\nFriend_list: "
+                    + "\nfriends_id: "
+                    + &friends_id_str,
             )
         }
         Err(_) => (
@@ -685,7 +711,7 @@ fn handle_put_request(request: &str) -> (String, String) {
         get_token_from_request(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok((user, user_info, user_ach)), Ok(token), Ok(mut client)) => {
+        (Ok((user, user_info, user_ach, friend_list)), Ok(token), Ok(mut client)) => {
             match Claims::verify_token(token) {
                 Ok(claims) => {
                     // возможно изменить на получение роли из бд
@@ -703,7 +729,7 @@ fn handle_put_request(request: &str) -> (String, String) {
 
                                     if user.email != Some(claims.sub) {
                                         if user_email_presence == false {
-                                            user_update(user, user_info, user_ach, &mut client, actual_id)
+                                            update_user(user, user_info, user_ach, friend_list, &mut client, actual_id)
                                         } else {
                                             (
                                                 OK_RESPONSE.to_string(), // изменить на другу ошибку
@@ -711,7 +737,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                             )
                                         }
                                     } else {
-                                        user_update(user, user_info, user_ach, &mut client, actual_id)
+                                        update_user(user, user_info, user_ach, friend_list, &mut client, actual_id)
                                     }
                                 }
                                 _ => {
@@ -743,10 +769,10 @@ fn handle_put_request(request: &str) -> (String, String) {
 
                                                     match (user_email_presence, get_user_email) {
                                                         (presence_email, actual_email) if presence_email && actual_email == user.email.clone().unwrap() => {
-                                                            user_update(user, user_info, user_ach, &mut client, get_id)
+                                                            update_user(user, user_info, user_ach, friend_list, &mut client, get_id)
                                                         }
                                                         (presence_email, _actual_email) if presence_email == false => {
-                                                            user_update(user, user_info, user_ach, &mut client, get_id)
+                                                            update_user(user, user_info, user_ach, friend_list, &mut client, get_id)
                                                         }
                                                         _ => {
                                                             (
@@ -790,7 +816,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                                 // изменённый email и истинный email
                                         if user.email != Some(claims.sub) {
                                             if user_email_presence == false {
-                                                user_update(user, user_info, user_ach, &mut client, actual_id)
+                                                update_user(user, user_info, user_ach, friend_list, &mut client, actual_id)
                                             } else {
                                                 (
                                                     OK_RESPONSE.to_string(), // изменить OK_RESPONSE на другу ошибку
@@ -798,7 +824,7 @@ fn handle_put_request(request: &str) -> (String, String) {
                                                 )
                                             }
                                         } else {
-                                            user_update(user, user_info, user_ach, &mut client, actual_id)
+                                            update_user(user, user_info, user_ach, friend_list, &mut client, actual_id)
                                         }
                                     }
                                     _ => {
@@ -834,13 +860,92 @@ fn handle_put_request(request: &str) -> (String, String) {
     }
 }
 
+fn handle_add_friend_request(request: &str) -> (String, String) {
+    match (
+        get_user_request_body(&request),
+        get_token_from_request(&request),
+        Client::connect(DB_URL, NoTls),
+    ) {
+        (Ok((user, _user_info, _user_ach, friend_list)), Ok(token), Ok(mut client)) => {
+            match (
+                Claims::verify_token(token),
+                client.query_one(
+                    "SELECT EXISTS(SELECT users.id_user FROM users WHERE users.id_user = $1)",
+                    &[&friend_list.friend_id],
+                ),
+            ) {
+                (Ok(claims), Ok(check_id)) => {
+                    let friend_id_presence: bool = check_id.get(0);
+
+                    if friend_id_presence {
+                        match client.query_one(
+                            "SELECT users.id_user FROM users WHERE users.email = $1",
+                            &[&claims.sub],
+                        ) {
+                            Ok(user_id) => {
+                                let actual_id: i32 = user_id.get(0);
+                                match client.query_one(
+                                    "SELECT EXISTS(SELECT friend_list.friend_id FROM friend_list WHERE id_user = $2 AND friend_id = $1)",
+                                    &[&friend_list.friend_id, &actual_id],
+                                ) {
+                                    Ok(check_if_friend_in_friend_list) => {
+                                        let check_friend: bool = check_if_friend_in_friend_list.get(0);
+                                        if check_friend == false && actual_id != friend_list.friend_id.unwrap_or_default() {
+                                            client
+                                                .execute(
+                                                    INSERT_FRIEND_LIST_SCRIPT,
+                                                    &[&friend_list.friend_id, &actual_id],
+                                                )
+                                                .unwrap();
+                                            (
+                                                INTERNAL_SERVER_ERROR.to_string(),
+                                                "Friend added to friends list".to_string(),
+                                            )
+                                        } else {
+                                            (
+                                                INTERNAL_SERVER_ERROR.to_string(),
+                                                "Friend has already been added to the friends list or its your id".to_string(),
+                                            )
+                                        }
+                                    }
+                                    _ => (
+                                        NOT_FOUND_RESPONSE.to_string(),
+                                        "Some problem with connect to database".to_string(),
+                                    ),
+                                }
+                            }
+                            _ => (
+                                NOT_FOUND_RESPONSE.to_string(),
+                                "Some problem with connect to database".to_string(),
+                            ),
+                        }
+                    } else {
+                        (
+                            NOT_FOUND_RESPONSE.to_string(),
+                            "User with this id is not found".to_string(),
+                        )
+                    }
+                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    "Token is not valid or some problem with connect to database".to_string(),
+                ),
+            }
+        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            "Internal Error".to_string(),
+        ),
+    }
+}
+
 // добавить валидацию email и name
 fn handle_sign_up_request(request: &str) -> (String, String) {
     match (
         get_user_request_body(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok((user, user_info, _user_ach)), Ok(mut client)) => {
+        (Ok((user, user_info, _user_ach, _friend_list)), Ok(mut client)) => {
             match (
                 client.query_one(
                     "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
@@ -916,7 +1021,7 @@ fn handle_sign_in_request(request: &str) -> (String, String) {
         get_user_request_body(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok((user, mut user_info, _user_ach)), Ok(mut client)) => {
+        (Ok((user, mut user_info, _user_ach, _friend_list)), Ok(mut client)) => {
             match client.query_one(
                 "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                 &[&user.email],
@@ -947,14 +1052,14 @@ fn handle_sign_in_request(request: &str) -> (String, String) {
                             }
                             _ => {
                                 (
-                                    OK_RESPONSE.to_string(), // изменить на другу ошибку
+                                    NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
                                     "Trouble getting role".to_string(),
                                 )
                             }
                         }
                     } else {
                         (
-                            OK_RESPONSE.to_string(), // изменить на другу ошибку
+                            NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
                             "There is no user with this email".to_string(),
                         )
                     }

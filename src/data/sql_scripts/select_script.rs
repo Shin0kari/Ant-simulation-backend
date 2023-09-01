@@ -30,3 +30,9 @@ SELECT nickname, role, training_complete, mtx_lvl_access
 	FROM public.user_info
     WHERE id_user = $1;
 "#;
+
+pub const SELECT_FRIEND_LIST_SCRIPT: &str = r#"
+SELECT friend_id
+	FROM public.friend_list
+	WHERE id_user = $1;
+"#;
