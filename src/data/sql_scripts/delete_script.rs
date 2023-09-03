@@ -18,6 +18,11 @@ DELETE FROM public.friend_list
 	WHERE friend_id = $1 AND id_user = $2;
 "#;
 
+pub const DELETE_USER_FROM_FRIEND_LISTS_SCRIPT: &str = r#"	
+DELETE FROM public.friend_list
+	WHERE friend_id = $1;
+"#;
+
 pub const DELETE_USER_ACH_SCRIPT: &str = r#"
 DELETE FROM public.achievments_user
 	WHERE id_user = $1;

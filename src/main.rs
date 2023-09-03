@@ -6,10 +6,11 @@ use std::num::NonZeroU32;
 // у меня проект в паке rs_crud, хоть в гите и по другому
 use ::rs_crud::data::sql_scripts::{
     CREATE_DIAG, DELETE_FRIEND_LIST_SCRIPT, DELETE_FRIEND_SCRIPT, DELETE_USER_ACH_SCRIPT,
-    DELETE_USER_INFO_SCRIPT, DELETE_USER_SCRIPT, INSERT_ACH_USER_SCRIPT, INSERT_FRIEND_LIST_SCRIPT,
-    INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT, SELECT_FRIEND_LIST_SCRIPT, SELECT_NICKNAME_SCRIPT,
-    SELECT_ROLE_SCRIPT, SELECT_USER_ACH_SCRIPT, SELECT_USER_INFO_SCRIPT, SELECT_USER_SCRIPT,
-    UPDATE_ACH_USER_SCRIPT, UPDATE_USER_INFO_SCRIPT, UPDATE_USER_SCRIPT,
+    DELETE_USER_FROM_FRIEND_LISTS_SCRIPT, DELETE_USER_INFO_SCRIPT, DELETE_USER_SCRIPT,
+    INSERT_ACH_USER_SCRIPT, INSERT_FRIEND_LIST_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
+    SELECT_FRIEND_LIST_SCRIPT, SELECT_NICKNAME_SCRIPT, SELECT_ROLE_SCRIPT, SELECT_USER_ACH_SCRIPT,
+    SELECT_USER_INFO_SCRIPT, SELECT_USER_SCRIPT, UPDATE_ACH_USER_SCRIPT, UPDATE_USER_INFO_SCRIPT,
+    UPDATE_USER_SCRIPT,
 };
 
 use data_encoding::HEXUPPER;
@@ -421,66 +422,6 @@ fn update_user(
             ("Error occurred while updating the user: ".to_string()),
         ),
     }
-
-    // // для user
-    // client
-    //     .execute(UPDATE_USER_SCRIPT, &[&actual_id, &hash_pswd, &user.email])
-    //     .unwrap();
-    // // для info_user
-    // client
-    //     .execute(
-    //         UPDATE_USER_INFO_SCRIPT,
-    //         &[&actual_id, &user_info.name, &user_info.training_complete],
-    //     )
-    //     .unwrap();
-
-    // // необходим при обновлении email и pswd пользователя
-    // let token = Claims::create_jwt_token(&user, &user_info);
-
-    // // для user_ach
-    // let mut data_ach: Vec<bool> = Vec::new();
-    // let mut update_user_ach = user_ach.ach.clone().unwrap_or_default().into_iter();
-
-    // let complete_execute = match get_user_ach(actual_id, client) {
-    //     Ok(db_user_ach) => {
-    //         for actual_user_ach in db_user_ach.ach.unwrap_or_default() {
-    //             if (actual_user_ach || update_user_ach.next().unwrap_or_default()) == true {
-    //                 data_ach.push(true);
-    //             } else {
-    //                 data_ach.push(false);
-    //             }
-    //         }
-
-    //         client
-    //             .execute(
-    //                 UPDATE_ACH_USER_SCRIPT,
-    //                 &[
-    //                     &actual_id,
-    //                     &data_ach[0],
-    //                     &data_ach[1],
-    //                     &data_ach[2],
-    //                     &data_ach[3],
-    //                     &data_ach[4],
-    //                 ],
-    //             )
-    //             .unwrap();
-
-    //         true
-    //     }
-    //     _ => false,
-    // };
-
-    // if complete_execute {
-    //     (
-    //         OK_RESPONSE.to_string(),
-    //         "User update, new token: ".to_string() + &token,
-    //     )
-    // } else {
-    //     (
-    //         OK_RESPONSE.to_string(),
-    //         ("Error occurred while updating the user: ".to_string()),
-    //     )
-    // }
 }
 
 fn select_user_data(
@@ -687,12 +628,14 @@ fn delete_user(mut client: Client, actual_id: i32) -> (String, String) {
         client.execute(DELETE_FRIEND_LIST_SCRIPT, &[&actual_id]),
         client.execute(DELETE_USER_ACH_SCRIPT, &[&actual_id]),
         client.execute(DELETE_USER_SCRIPT, &[&actual_id]),
+        client.execute(DELETE_USER_FROM_FRIEND_LISTS_SCRIPT, &[&actual_id]),
     ) {
         (
             Ok(delete_user_info_line),
             Ok(delete_friend_list_line),
             Ok(delete_user_ach_line),
             Ok(delete_user_line),
+            Ok(delete_user_from_friend_lists_line),
         ) => (
             OK_RESPONSE.to_string(), // изменить на другу ошибку
             "User deleted".to_string(),
