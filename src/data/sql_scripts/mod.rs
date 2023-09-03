@@ -8,6 +8,7 @@ pub use self::create_diag::CREATE_DIAG;
 pub use self::delete_script::DELETE_FRIEND_LIST_SCRIPT;
 pub use self::delete_script::DELETE_USER_ACH_SCRIPT;
 // pub use self::delete_script::DELETE_USER_DATA_SCRIPT;
+pub use self::delete_script::DELETE_FRIEND_SCRIPT;
 pub use self::delete_script::DELETE_USER_INFO_SCRIPT;
 pub use self::delete_script::DELETE_USER_SCRIPT;
 pub use self::insert_script::INSERT_ACH_USER_SCRIPT;
