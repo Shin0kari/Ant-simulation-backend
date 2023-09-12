@@ -25,6 +25,8 @@ use time::{Duration, OffsetDateTime};
 
 use serde::{Deserialize, Serialize};
 
+use validator::Validate;
+
 // не менять секретный ключ на что то более секретное
 const KEY: &str = "secret";
 
@@ -64,27 +66,30 @@ mod jwt_numeric_date {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Validate, Clone)]
 struct User {
     id: Option<i32>,
+    #[validate(required, length(min = 4))]
     pswd: Option<String>,
+    #[validate(email)]
     email: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Validate, Clone)]
 struct UserInfo {
     role: Option<String>,
+    #[validate(required, length(min = 1))]
     name: Option<String>,
     training_complete: Option<bool>,
     mtx_lvl: Option<i16>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct UserAch {
     ach: Option<Vec<bool>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct UserListFriend {
     frined_list: Option<Vec<i32>>,
     friend_id: Option<i32>,
@@ -104,7 +109,7 @@ struct Claims {
 
 impl Claims {
     // Проверка JWT
-    pub fn verify_token(token: &str) -> Result<Claims, (String, String)> {
+    pub fn verify_token(token: &str) -> Result<Claims, (String, serde_json::Value)> {
         let decoding_key = DecodingKey::from_secret(KEY.as_bytes());
         let validation = Validation::new(Algorithm::HS512);
 
@@ -113,15 +118,18 @@ impl Claims {
             Err(err) => match *err.kind() {
                 // сделать вывод ошибки
                 jsonwebtoken::errors::ErrorKind::InvalidToken => {
-                    Err((OK_RESPONSE.to_string(), "Token is invalid".to_string()))
+                    let response: serde_json::Value = json!({ "Error": "Token is invalid" });
+                    Err((OK_RESPONSE.to_string(), response))
                 } // Example on how to handle a specific error
                 jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
-                    Err((OK_RESPONSE.to_string(), "Issuer is invalid".to_string()))
+                    let response: serde_json::Value = json!({ "Error": "Issuer is invalid" });
+                    Err((OK_RESPONSE.to_string(), response))
                 } // Example on how to handle a specific error
-                _ => Err((
-                    OK_RESPONSE.to_string(),
-                    "Having problems decoding the token".to_string(),
-                )),
+                _ => {
+                    let response: serde_json::Value =
+                        json!({ "Error": "Having problems decoding the token" });
+                    Err((OK_RESPONSE.to_string(), response))
+                }
             },
         }
     }
@@ -235,79 +243,91 @@ fn get_token_from_request(request: &str) -> Result<&str, std::io::Error> {
 
 fn get_user_request_body(
     request: &str,
-) -> Result<(User, UserInfo, UserAch, UserListFriend), serde_json::Error> {
-    let data_value: Value =
-        serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())?;
+) -> Result<(User, UserInfo, UserAch, UserListFriend), (String, Value)> {
+    match serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default()) {
+        Ok(val) => {
+            let data_value: Value = val;
+            let user = User {
+                id: Some(
+                    data_value["user"]["id"]
+                        .as_i64()
+                        .unwrap_or_default()
+                        .to_string()
+                        .parse::<i32>()
+                        .unwrap_or_default(),
+                ),
+                pswd: Some(
+                    data_value["user"]["pswd"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+                email: Some(
+                    data_value["user"]["email"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+            };
 
-    let user = User {
-        id: Some(
-            data_value["user"]["id"]
-                .as_i64()
-                .unwrap_or_default()
-                .to_string()
-                .parse::<i32>()
-                .unwrap_or_default(),
-        ),
-        pswd: Some(
-            data_value["user"]["pswd"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-        ),
-        email: Some(
-            data_value["user"]["email"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-        ),
-    };
+            let user_info = UserInfo {
+                role: None,
+                name: Some(
+                    data_value["user_info"]["name"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+                training_complete: Some(
+                    data_value["user_info"]["training_complete"]
+                        .as_bool()
+                        .unwrap_or_default(),
+                ),
+                mtx_lvl: None,
+            };
 
-    let user_info = UserInfo {
-        role: None,
-        name: Some(
-            data_value["user_info"]["name"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-        ),
-        training_complete: Some(
-            data_value["user_info"]["training_complete"]
-                .as_bool()
-                .unwrap_or_default(),
-        ),
-        mtx_lvl: None,
-    };
+            let mut request_ach: Vec<bool> = Vec::new();
 
-    let mut request_ach: Vec<bool> = Vec::new();
+            if data_value["user_ach"].clone().is_null() == false {
+                for i in 0..data_value["user_ach"]
+                    .clone()
+                    .as_array()
+                    .expect("Somthink wrong with ach, the programmer will cry")
+                    .len()
+                {
+                    request_ach.push(data_value["user_ach"][i].as_bool().unwrap_or_default());
+                }
+            }
 
-    if data_value["user_ach"].clone().is_null() == false {
-        for i in 0..data_value["user_ach"]
-            .clone()
-            .as_array()
-            .expect("Somthink wrong with ach, the programmer will cry")
-            .len()
-        {
-            request_ach.push(data_value["user_ach"][i].as_bool().unwrap_or_default());
+            let user_ach = UserAch {
+                ach: Some(request_ach),
+            };
+
+            let friend_list = UserListFriend {
+                frined_list: None,
+                friend_id: Some(
+                    data_value["friend_id"]
+                        .as_i64()
+                        .unwrap_or_default()
+                        .to_string()
+                        .parse::<i32>()
+                        .unwrap_or_default(),
+                ),
+            };
+
+            println!(
+                "Len in request body: {:?}",
+                user.pswd.clone().unwrap_or_default().len()
+            );
+
+            Ok((user, user_info, user_ach, friend_list))
+        }
+        _ => {
+            let response: serde_json::Value =
+                json!({ "Error": "error occurred while processing the request" });
+            Err((OK_RESPONSE.to_string(), response))
         }
     }
-
-    let user_ach = UserAch {
-        ach: Some(request_ach),
-    };
-
-    let friend_list = UserListFriend {
-        frined_list: None,
-        friend_id: Some(
-            data_value["friend_id"]
-                .as_i64()
-                .unwrap_or_default()
-                .to_string()
-                .parse::<i32>()
-                .unwrap_or_default(),
-        ),
-    };
-
-    Ok((user, user_info, user_ach, friend_list))
 }
 
 fn main() {
@@ -366,58 +386,91 @@ fn handle_client(mut stream: TcpStream) {
 }
 
 fn update_user(
-    user: User,
-    user_info: UserInfo,
+    user: &mut User,
+    user_info: &mut UserInfo,
     user_ach: UserAch,
     client: &mut Client,
     actual_id: i32,
 ) -> (String, serde_json::Value) {
-    let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
+    match select_user_data(actual_id, client) {
+        Ok((db_user, db_user_info, db_user_ach, _db_user_friends)) => {
+            let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
 
-    match (
-        client.execute(UPDATE_USER_SCRIPT, &[&actual_id, &hash_pswd, &user.email]),
-        client.execute(
-            UPDATE_USER_INFO_SCRIPT,
-            &[&actual_id, &user_info.name, &user_info.training_complete],
-        ),
-        get_user_ach(actual_id, client),
-    ) {
-        (Ok(_check_update_user), Ok(_check_update_user_info), Ok(db_user_ach)) => {
-            // необходим при обновлении email и pswd пользователя
-            let token = Claims::create_jwt_token(&user, &user_info);
+            // let mut check_user_email = user.email.clone().is_none();
+            // let mut check_user_pswd = user.pswd.clone().is_none();
+            // let mut check_user_info_name = user_info.name.clone().is_none();
+            let check_user_info_role = user_info.role.clone().is_none();
+            let check_user_info_mtx_lvl = user_info.mtx_lvl.clone().is_none();
+            let check_user_info_training_complete = user_info.training_complete.clone().is_none();
 
-            // // для user_ach
-            let mut data_ach: Vec<bool> = Vec::new();
-            let mut update_user_ach = user_ach.ach.clone().unwrap_or_default().into_iter();
-
-            for actual_user_ach in db_user_ach.ach.unwrap_or_default() {
-                if (actual_user_ach || update_user_ach.next().unwrap_or_default()) == true {
-                    data_ach.push(true);
-                } else {
-                    data_ach.push(false);
-                }
+            if user.email.clone().unwrap_or_default().len() == 0 {
+                user.email = db_user.email;
+            }
+            if user.pswd.clone().unwrap_or_default().len() == 0 {
+                user.pswd = db_user.pswd;
+            }
+            if user_info.name.clone().unwrap_or_default().len() == 0 {
+                user_info.name = db_user_info.name;
+            }
+            if check_user_info_role {
+                user_info.role = db_user_info.role;
+            }
+            if check_user_info_mtx_lvl {
+                user_info.mtx_lvl = db_user_info.mtx_lvl;
+            }
+            if check_user_info_training_complete {
+                user_info.training_complete = db_user_info.training_complete;
             }
 
-            client
-                .execute(
-                    UPDATE_ACH_USER_SCRIPT,
-                    &[
-                        &actual_id,
-                        &data_ach[0],
-                        &data_ach[1],
-                        &data_ach[2],
-                        &data_ach[3],
-                        &data_ach[4],
-                    ],
-                )
-                .unwrap();
+            match (
+                client.execute(UPDATE_USER_SCRIPT, &[&actual_id, &hash_pswd, &user.email]),
+                client.execute(
+                    UPDATE_USER_INFO_SCRIPT,
+                    &[&actual_id, &user_info.name, &user_info.training_complete],
+                ),
+            ) {
+                (Ok(_check_update_user), Ok(_check_update_user_info)) => {
+                    // необходим при обновлении email и pswd пользователя
+                    let token = Claims::create_jwt_token(&user, &user_info);
 
-            let response: serde_json::Value = json!({ "Response": token });
-            (OK_RESPONSE.to_string(), response)
+                    // // для user_ach
+                    let mut data_ach: Vec<bool> = Vec::new();
+                    let mut update_user_ach = user_ach.ach.clone().unwrap_or_default().into_iter();
+
+                    for actual_user_ach in db_user_ach.ach.unwrap_or_default() {
+                        if (actual_user_ach || update_user_ach.next().unwrap_or_default()) == true {
+                            data_ach.push(true);
+                        } else {
+                            data_ach.push(false);
+                        }
+                    }
+
+                    client
+                        .execute(
+                            UPDATE_ACH_USER_SCRIPT,
+                            &[
+                                &actual_id,
+                                &data_ach[0],
+                                &data_ach[1],
+                                &data_ach[2],
+                                &data_ach[3],
+                                &data_ach[4],
+                            ],
+                        )
+                        .unwrap();
+
+                    let response: serde_json::Value = json!({ "Response": token });
+                    (OK_RESPONSE.to_string(), response)
+                }
+                _ => {
+                    let response: serde_json::Value =
+                        json!({ "Error": "Error occurred while updating the user" });
+                    (OK_RESPONSE.to_string(), response)
+                }
+            }
         }
         _ => {
-            let response: serde_json::Value =
-                json!({ "Error": "Error occurred while updating the user" });
+            let response: serde_json::Value = json!({ "Error": "An error occurred while retrieving user data when updating user info" });
             (OK_RESPONSE.to_string(), response)
         }
     }
@@ -540,29 +593,6 @@ fn read_user(mut client: Client, actual_id: i32) -> (String, serde_json::Value) 
                 }
             });
             (OK_RESPONSE.to_string(), response)
-            // (
-            //     OK_RESPONSE.to_string(), // изменить на другу ошибку
-            //     "User: ".to_string()
-            //         + "\nid: = "
-            //         + user.id.unwrap().to_string().as_str()
-            //         + "\nemail: = "
-            //         + user.email.unwrap().as_str()
-            //         + "\n\nUser_info: "
-            //         + "\nname: "
-            //         + user_info.name.unwrap().as_str()
-            //         + "\nrole: "
-            //         + user_info.role.unwrap().as_str()
-            //         + "\ntraining complete: "
-            //         + user_info.training_complete.unwrap().to_string().as_str()
-            //         + "\nmtx_lvl: "
-            //         + user_info.mtx_lvl.unwrap().to_string().as_str()
-            //         + "\n\nUser_ach: "
-            //         + "\nach: "
-            //         + &ach_str
-            //         + "\n\nFriend_list: "
-            //         + "\nfriends_id: "
-            //         + &friends_id_str,
-            // )
         }
         _ => {
             let response: serde_json::Value = json!({ "Error": "Error creating initial table" });
@@ -641,11 +671,11 @@ fn delete_user(mut client: Client, actual_id: i32) -> (String, serde_json::Value
         client.execute(DELETE_USER_FROM_FRIEND_LISTS_SCRIPT, &[&actual_id]),
     ) {
         (
-            Ok(delete_user_info_line),
-            Ok(delete_friend_list_line),
-            Ok(delete_user_ach_line),
-            Ok(delete_user_line),
-            Ok(delete_user_from_friend_lists_line),
+            Ok(_delete_user_info_line),
+            Ok(_delete_friend_list_line),
+            Ok(_delete_user_ach_line),
+            Ok(_delete_user_line),
+            Ok(_delete_user_from_friend_lists_line),
         ) => {
             let response: serde_json::Value = json!({ "Response": "User deleted" });
             (OK_RESPONSE.to_string(), response)
@@ -725,9 +755,13 @@ fn handle_put_request(request: &str) -> (String, serde_json::Value) {
         get_token_from_request(&request),
         Client::connect(DB_URL, NoTls),
     ) {
-        (Ok((user, mut user_info, user_ach, _friend_list)), Ok(token), Ok(mut client)) => {
-            match Claims::verify_token(token) {
-                Ok(claims) => {
+        (Ok((mut user, mut user_info, user_ach, _friend_list)), Ok(token), Ok(mut client)) => {
+            match (
+                Claims::verify_token(token),
+                user.clone().validate(),
+                user_info.clone().validate(),
+            ) {
+                (Ok(claims), Ok(_), Ok(_)) => {
                     // возможно изменить на получение роли из бд
                     match claims.role {
                         r if r == "user".to_string() => {
@@ -744,14 +778,14 @@ fn handle_put_request(request: &str) -> (String, serde_json::Value) {
 
                                     if user.email != Some(claims.sub) {
                                         if user_email_presence == false {
-                                            update_user(user, user_info, user_ach, &mut client, actual_id)
+                                            update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                         } else {
                                             let response: serde_json::Value =
                                                 json!({ "Error": "This email is already taken" });
                                             (OK_RESPONSE.to_string(), response)
                                         }
                                     } else {
-                                        update_user(user, user_info, user_ach, &mut client, actual_id)
+                                        update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                     }
                                 }
                                 _ => {
@@ -783,10 +817,10 @@ fn handle_put_request(request: &str) -> (String, serde_json::Value) {
 
                                                     match (user_email_presence, get_user_email) {
                                                         (presence_email, actual_email) if presence_email && actual_email == user.email.clone().unwrap() => {
-                                                            update_user(user, user_info, user_ach, &mut client, get_id)
+                                                            update_user(&mut user, &mut user_info, user_ach, &mut client, get_id)
                                                         }
                                                         (presence_email, _actual_email) if presence_email == false => {
-                                                            update_user(user, user_info, user_ach, &mut client, get_id)
+                                                            update_user(&mut user, &mut user_info, user_ach, &mut client, get_id)
                                                         }
                                                         _ => {
                                                             let response: serde_json::Value =
@@ -826,14 +860,14 @@ fn handle_put_request(request: &str) -> (String, serde_json::Value) {
                                                 // изменённый email и истинный email
                                         if user.email != Some(claims.sub) {
                                             if user_email_presence == false {
-                                                update_user(user, user_info, user_ach, &mut client, actual_id)
+                                                update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                             } else {
                                                 let response: serde_json::Value =
                                                     json!({ "Error": "This email is already taken" });
                                                 (OK_RESPONSE.to_string(), response)
                                             }
                                         } else {
-                                            update_user(user, user_info, user_ach, &mut client, actual_id)
+                                            update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                         }
                                     }
                                     _ => {
@@ -852,12 +886,23 @@ fn handle_put_request(request: &str) -> (String, serde_json::Value) {
                         }
                     }
                 }
+                (Ok(_), Err(_), Ok(_)) => {
+                    let response: serde_json::Value =
+                        json!({ "Error": "This user email is not available" });
+                    (OK_RESPONSE.to_string(), response)
+                }
+                (Ok(_), Ok(_), Err(_)) => {
+                    let response: serde_json::Value =
+                        json!({ "Error": "This user nickname is not available" });
+                    (OK_RESPONSE.to_string(), response)
+                }
                 _ => {
                     let response: serde_json::Value = json!({ "Error": "Token is invalid" });
                     (OK_RESPONSE.to_string(), response)
                 }
             }
         }
+        (Err(error), Ok(_), Ok(_)) => error,
         _ => {
             let response: serde_json::Value = json!({ "Error": "Internal server error" });
             (INTERNAL_SERVER_ERROR.to_string(), response)
@@ -922,6 +967,7 @@ fn handle_delete_friend_request(request: &str) -> (String, serde_json::Value) {
                 }
             }
         }
+        (Err(error), Ok(_), Ok(_)) => error,
         _ => {
             let response: serde_json::Value = json!({ "Error": "Internal server error" });
             (INTERNAL_SERVER_ERROR.to_string(), response)
@@ -1004,6 +1050,7 @@ fn handle_add_friend_request(request: &str) -> (String, serde_json::Value) {
                 }
             }
         }
+        (Err(error), Ok(_), Ok(_)) => error,
         _ => {
             let response: serde_json::Value = json!({ "Error": "Internal server error" });
             (INTERNAL_SERVER_ERROR.to_string(), response)
@@ -1018,14 +1065,18 @@ fn handle_sign_up_request(request: &str) -> (String, serde_json::Value) {
         Client::connect(DB_URL, NoTls),
     ) {
         (Ok((user, user_info, _user_ach, _friend_list)), Ok(mut client)) => {
+            println!("pswd: {:?}", user.pswd.clone());
+            println!("Len: {:?}", user.pswd.clone().unwrap_or_default().len());
             match (
                 client.query_one(
                     "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
                     &[&user.email],
                 ),
                 client.query_one(SELECT_NICKNAME_SCRIPT, &[&user.email]),
+                user.clone().validate(),
+                user_info.clone().validate(),
             ) {
-                (Ok(check_email), Ok(check_name)) => {
+                (Ok(check_email), Ok(check_name), Ok(_), Ok(_)) => {
                     let user_email_presence: bool = check_email.get(0);
                     let user_name_presence: bool = check_name.get(0);
 
@@ -1071,6 +1122,16 @@ fn handle_sign_up_request(request: &str) -> (String, serde_json::Value) {
                         }
                     }
                 }
+                (Ok(_), Ok(_), Err(_), Ok(_)) => {
+                    let response: serde_json::Value =
+                        json!({ "Error": "This user email or pswd is not available" });
+                    (NOT_FOUND_RESPONSE.to_string(), response)
+                }
+                (Ok(_), Ok(_), Ok(_), Err(_)) => {
+                    let response: serde_json::Value =
+                        json!({ "Error": "This user nickname is not available" });
+                    (NOT_FOUND_RESPONSE.to_string(), response)
+                }
                 _ => {
                     let response: serde_json::Value =
                         json!({ "Error": "Error creating initial table" });
@@ -1078,6 +1139,7 @@ fn handle_sign_up_request(request: &str) -> (String, serde_json::Value) {
                 }
             }
         }
+        (Err(error), Ok(_)) => error,
         _ => {
             let response: serde_json::Value = json!({ "Error": "Internal server error" });
             (INTERNAL_SERVER_ERROR.to_string(), response)
@@ -1141,10 +1203,96 @@ fn handle_sign_in_request(request: &str) -> (String, serde_json::Value) {
                 }
             }
         }
-
+        (Err(error), Ok(_)) => error,
         _ => {
             let response: serde_json::Value = json!({ "Error": "Internal server error" });
             (INTERNAL_SERVER_ERROR.to_string(), response)
         }
     }
 }
+
+// use serde_json::{json, Value};
+// use validator::Validate;
+
+// use serde::{Deserialize, Serialize};
+
+// #[derive(Debug, Validate, Clone)]
+// struct User {
+//     id: Option<i32>,
+//     pswd: Option<String>,
+//     #[validate(email)]
+//     email: Option<String>,
+// }
+
+// #[derive(Debug, Validate, Clone)]
+// struct UserInfo {
+//     role: Option<String>,
+//     #[validate(required, length(min = 1))]
+//     name: Option<String>,
+//     training_complete: Option<bool>,
+//     mtx_lvl: Option<i16>,
+// }
+
+// #[derive(Serialize, Deserialize, Debug, Clone)]
+// struct UserAch {
+//     ach: Option<Vec<bool>>,
+// }
+
+// fn abc(
+//     user: User,
+//     user_info: UserInfo,
+//     user_ach: UserAch,
+// ) -> Result<(User, UserInfo, UserAch), (String, Value)> {
+//     // match (user.clone().validate(), user_info.clone().validate()) {
+//     //     (Ok(_), Ok(_)) => Ok((user, user_info)),
+//     //     (Ok(_), Err(_)) => Err("Yes but No".to_string()),
+//     //     (Err(_), Ok(_)) => Err("No but Yes".to_string()),
+//     //     _ => Err("no no no".to_string()),
+//     // }
+//     match (user.clone().validate(), user_info.clone().validate()) {
+//         (Ok(_), Ok(_)) => {
+//             println!("Что то пошло не так");
+//             Ok((user, user_info, user_ach))
+//         }
+//         (Err(_), Ok(_)) => {
+//             let response: serde_json::Value = json!({ "Error": "This email cannot be used" });
+//             Err(("OK_RESPONSE".to_string(), response))
+//         }
+//         (Ok(_), Err(_)) => {
+//             let response: serde_json::Value = json!({ "Error": "This name cannot be used" });
+//             Err(("OK_RESPONSE".to_string(), response))
+//         }
+//         _ => {
+//             let response: serde_json::Value =
+//                 json!({ "Error": "This email and name cannot be used" });
+//             Err(("OK_RESPONSE".to_string(), response))
+//         }
+//     }
+// }
+
+// fn main() {
+//     let user = User {
+//         id: None,
+//         pswd: Some("124".to_string()),
+//         email: Some("jopa@mail.ru".to_string()),
+//     };
+
+//     let user_info = UserInfo {
+//         role: None,
+
+//         name: Some("".to_string()),
+//         training_complete: Some(false),
+//         mtx_lvl: Some(1),
+//     };
+
+//     let user_ach = UserAch {
+//         ach: Some([].to_vec()),
+//     };
+
+//     match abc(user, user_info, user_ach) {
+//         Ok((user, _user_info, user_ach)) => {
+//             println!("{}", user.email.unwrap())
+//         }
+//         Err(error) => println!("{:?}", error),
+//     }
+// }
