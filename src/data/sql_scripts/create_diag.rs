@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS public.users(
 CREATE TABLE IF NOT EXISTS public.user_info
 (
     id_user integer NOT NULL UNIQUE,
-    nickname character varying COLLATE pg_catalog."default" NOT NULL,
     role character varying COLLATE pg_catalog."default" NOT NULL DEFAULT 'user'::character varying,
     training_complete boolean NOT NULL DEFAULT false,
     mtx_lvl_access smallint NOT NULL DEFAULT 1,

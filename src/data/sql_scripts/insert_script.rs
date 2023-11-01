@@ -6,8 +6,8 @@ INSERT INTO public.users(
 
 pub const INSERT_USER_INFO_SCRIPT: &str = r#"
 INSERT INTO public.user_info(
-	id_user, nickname)
-	VALUES ((SELECT id_user FROM public.users WHERE email = $1), $2);
+	id_user)
+	VALUES ((SELECT id_user FROM public.users WHERE email = $1));
 "#;
 
 pub const INSERT_ACH_USER_SCRIPT: &str = r#"
