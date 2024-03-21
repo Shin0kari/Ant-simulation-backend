@@ -3,14 +3,13 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
-use handle_get_user_data_req::{
-    data::{
-        general_func::{get_id_from_request, get_token_from_request},
-        list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
-        not_general_func::read_user,
-    },
+use ant_rust_backend_lib::data::handle_req::func_used_in_req::{
+    general_func::{get_id_from_request, get_token_from_request},
+    list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
+    not_general_func::read_user,
     secret_fn::{Claims, DB_URL},
 };
+
 use serde_json::json;
 
 use postgres::{Client, NoTls};

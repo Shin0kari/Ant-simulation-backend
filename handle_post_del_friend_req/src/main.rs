@@ -3,14 +3,15 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
-use handle_post_del_friend_req::{
-    data::{
+use ant_rust_backend_lib::data::{
+    handle_req::func_used_in_req::{
         general_func::{get_token_from_request, get_user_request_body},
         list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
+        secret_fn::{Claims, DB_URL},
     },
-    secret_fn::{Claims, DB_URL},
-    sql_scripts::{delete_script::DELETE_FRIEND_SCRIPT, INSERT_FRIEND_LIST_SCRIPT},
+    sql_scripts::{delete_script::DELETE_FRIEND_SCRIPT, insert_script::INSERT_FRIEND_LIST_SCRIPT},
 };
+
 use postgres::{Client, NoTls};
 use serde_json::json;
 use simple_threadpool_func_bio::simple_threadpool_func::ThreadPool;

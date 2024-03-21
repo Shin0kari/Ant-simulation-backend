@@ -3,14 +3,13 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
-use handle_put_del_user_data_req::{
-    data::{
-        general_func::{get_id_from_request, get_token_from_request, get_user_request_body},
-        list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
-        not_general_func::{delete_user, update_user},
-    },
+use ant_rust_backend_lib::data::handle_req::func_used_in_req::{
+    general_func::{get_id_from_request, get_token_from_request, get_user_request_body},
+    list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
+    not_general_func::{delete_user, update_user},
     secret_fn::{Claims, DB_URL},
 };
+
 use postgres::{Client, NoTls};
 use serde_json::json;
 use simple_threadpool_func_bio::simple_threadpool_func::ThreadPool;
