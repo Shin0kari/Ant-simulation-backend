@@ -1,0 +1,17 @@
+{
+    "rust_sign_up": {
+        "state": "+"
+    },
+    "rust_sign_in": {
+        "state": "+"
+    },
+    "rust_get_user_data": {
+        "state": "+"
+    },
+    "rust_put_del_user_data": {
+        "state": "+"
+    },
+    "rust_post_del_friend": {
+        "state": "+"
+    }
+}

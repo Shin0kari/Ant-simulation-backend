@@ -1,18 +1,20 @@
 version: '3.9'
 
 services:
-  rustapp:
-    container_name: rustapp
-    image: rustapp
+  rust_runner:
+    container_name: rust_runner
+    image: rust_runner
     build:
       args:
         DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ./rust_runner/Dockerfile
     ports:
       - '8080:8080'
     depends_on:
       - db
+    networks:
+      - mynetwork
 
   db:
     container_name: db
@@ -25,6 +27,76 @@ services:
       - '5436:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - mynetwork
+
+  rust_sign_up:
+    container_name: rust_sign_up
+    image: rust_sign_up
+    build:
+      context: .
+      dockerfile: ./handle_signup_req/Dockerfile
+    expose:
+      - '5544'
+    depends_on:
+      - rust_runner
+    networks:
+      - mynetwork
+
+  rust_sign_in:
+    container_name: rust_sign_in
+    image: rust_sign_in
+    build:
+      context: .
+      dockerfile: ./handle_signin_req/Dockerfile
+    expose:
+      - '5545'
+    depends_on:
+      - rust_runner
+    networks:
+      - mynetwork
+
+  rust_get_user_data:
+    container_name: rust_get_user_data
+    image: rust_get_user_data
+    build:
+      context: .
+      dockerfile: ./handle_get_user_data_req/Dockerfile
+    expose:
+      - '5546'
+    depends_on:
+      - rust_runner
+    networks:
+      - mynetwork
+
+  rust_put_del_user_data:
+    container_name: rust_put_del_user_data
+    image: rust_put_del_user_data
+    build:
+      context: .
+      dockerfile: ./handle_put_del_user_data_req/Dockerfile
+    expose:
+      - '5547'
+    depends_on:
+      - rust_runner
+    networks:
+      - mynetwork
+
+  rust_post_del_friend:
+    container_name: rust_post_del_friend
+    image: rust_post_del_friend
+    build:
+      context: .
+      dockerfile: ./handle_post_del_friend_req/Dockerfile
+    expose:
+      - '5548'
+    depends_on:
+      - rust_runner
+    networks:
+      - mynetwork
 
 volumes:
   pgdata: {}
+
+networks:
+  mynetwork:
