@@ -7,7 +7,7 @@ use ant_rust_backend_lib::data::{
     handle_req::func_used_in_req::{
         general_func::{get_token_from_request, get_user_request_body},
         list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
-        secret_fn::{Claims, DB_URL},
+        secret_fn::{get_env_data, Claims},
     },
     sql_scripts::{delete_script::DELETE_FRIEND_SCRIPT, insert_script::INSERT_FRIEND_LIST_SCRIPT},
 };
@@ -52,12 +52,13 @@ fn handle_post_del_friend(mut stream: TcpStream) {
                 r if (!r.to_string().is_empty() && r.starts_with("DELETE /del_user_friend/")) => {
                     del_friend_request(r)
                 }
-                _ => {
-                    let response: serde_json::Value = json!({ "Error": "Not found response" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Not found response" }),
+                ),
             };
 
+            // ставлю "//" чтобы потом можно было бы разделить status_line и content
             stream
                 .write_all((content.0 + "//" + &content.1.to_string()).as_bytes())
                 .unwrap();
@@ -69,10 +70,11 @@ fn handle_post_del_friend(mut stream: TcpStream) {
 }
 
 fn post_friend_request(request: &str) -> (String, serde_json::Value) {
+    let db_url: &str = &get_env_data("DB_URL");
     match (
         get_user_request_body(request),
         get_token_from_request(request),
-        Client::connect(DB_URL, NoTls),
+        Client::connect(db_url, NoTls),
     ) {
         (Ok((_user, _user_info, _user_ach, friend_list)), Ok(token), Ok(mut client)) => {
             match (
@@ -112,65 +114,51 @@ fn post_friend_request(request: &str) -> (String, serde_json::Value) {
                                                     &[&friend_id, &actual_id],
                                                 )
                                                 .unwrap();
-                                            let response: serde_json::Value =
-                                                json!({ "Response": "Friend added to friends list" });
-                                            (OK_RESPONSE.to_string(), response)
+                                            
+                                            (OK_RESPONSE.to_string(), json!({ "Response": "Friend added to friends list" }))
                                         } else if actual_id == friend_id {
-                                            let response: serde_json::Value =
-                                                json!({ "Error": "You are trying to add your email to your friends list" });
-                                            (OK_RESPONSE.to_string(), response)
+                                            (OK_RESPONSE.to_string(), json!({ "Error": "You are trying to add your email to your friends list" }))
                                         } else {
-                                            let response: serde_json::Value =
-                                                json!({ "Error": "Friend has already been added to the friends list" });
-                                            (OK_RESPONSE.to_string(), response)
+                                            (OK_RESPONSE.to_string(), json!({ "Error": "Friend has already been added to the friends list" }))
                                         }
                                     }
                                     _ => {
-                                        let response: serde_json::Value =
-                                            json!({ "Error": "Some problem with connect to database" });
-                                        (OK_RESPONSE.to_string(), response)
+                                        (OK_RESPONSE.to_string(), json!({ "Error": "Some problem with connect to database" }))
                                     }
                                 }
                             }
                             _ => {
-                                let response: serde_json::Value =
-                                    json!({ "Error": "Some problem with connect to database" });
-                                (OK_RESPONSE.to_string(), response)
+                                (OK_RESPONSE.to_string(), json!({ "Error": "Some problem with connect to database" }))
                             }
                         }
                     } else {
-                        let response: serde_json::Value =
-                            json!({ "Error": "User with this email is not found" });
-                        (OK_RESPONSE.to_string(), response)
+                        (OK_RESPONSE.to_string(), json!({ "Error": "User with this email is not found" }))
                     }
                 }
                 (Ok(_), Err(_)) => {
-                    let response: serde_json::Value = json!({ "Error": "User is not found or some problem with connect to database" });
-                    (OK_RESPONSE.to_string(), response)
+                    (OK_RESPONSE.to_string(), json!({ "Error": "User is not found or some problem with connect to database" }))
                 }
                 (Err(_), Ok(_)) => {
-                    let response: serde_json::Value = json!({ "Error": "Token is not valid" });
-                    (OK_RESPONSE.to_string(), response)
+                    (OK_RESPONSE.to_string(), json!({ "Error": "Token is not valid" }))
                 }
                 _ => {
-                    let response: serde_json::Value = json!({ "Error": "Token is not valid or some problem with connect to database" });
-                    (OK_RESPONSE.to_string(), response)
+                    (OK_RESPONSE.to_string(), json!({ "Error": "Token is not valid or some problem with connect to database" }))
                 }
             }
         }
         (Err(error), Ok(_), Ok(_)) => error,
         _ => {
-            let response: serde_json::Value = json!({ "Error": "Internal server error" });
-            (INTERNAL_SERVER_ERROR.to_string(), response)
+            (INTERNAL_SERVER_ERROR.to_string(), json!({ "Error": "Internal server error" }))
         }
     }
 }
 
 fn del_friend_request(request: &str) -> (String, serde_json::Value) {
+    let db_url: &str = &get_env_data("DB_URL");
     match (
         get_user_request_body(request),
         get_token_from_request(request),
-        Client::connect(DB_URL, NoTls),
+        Client::connect(db_url, NoTls),
     ) {
         (Ok((_user, _user_info, _user_ach, friend_list)), Ok(token), Ok(mut client)) => {
             match Claims::verify_token(token) {
@@ -201,48 +189,36 @@ fn del_friend_request(request: &str) -> (String, serde_json::Value) {
                                                 &[&friend_id, &actual_id],
                                             )
                                             .unwrap();
-                                        let response: serde_json::Value =
-                                            json!({ "Response": "User removed from your friends list" });
-                                        (OK_RESPONSE.to_string(), response)
+                                        
+                                        (OK_RESPONSE.to_string(), json!({ "Response": "User removed from your friends list" }))
                                     } else {
-                                        let response: serde_json::Value =
-                                            json!({ "Error": "There is no friend with this email in your friends list" });
-                                        (OK_RESPONSE.to_string(), response)
+                                        (OK_RESPONSE.to_string(), json!({ "Error": "There is no friend with this email in your friends list" }))
                                     }
                                 }
                                 _ => {
-                                    let response: serde_json::Value =
-                                        json!({ "Error": "Some problem with connect to database" });
-                                    (OK_RESPONSE.to_string(), response)
+                                    (OK_RESPONSE.to_string(), json!({ "Error": "Some problem with connect to database" }))
                                 }
                             }
                         }
                         (Ok(_user_id), Err(_error)) => {
-                            let response: serde_json::Value =
-                                json!({ "Error": "This user has already been deleted" });
-                            (OK_RESPONSE.to_string(), response)
+                            (OK_RESPONSE.to_string(), json!({ "Error": "This user has already been deleted" }))
                         }
                         (Err(_error), Ok(_friend_id)) => {
-                            let response: serde_json::Value = json!({ "Error": "This user has already been removed from your friends list" });
-                            (OK_RESPONSE.to_string(), response)
+                            (OK_RESPONSE.to_string(), json!({ "Error": "This user has already been removed from your friends list" }))
                         }
                         _ => {
-                            let response: serde_json::Value =
-                                json!({ "Error": "Some problem with connect to database" });
-                            (OK_RESPONSE.to_string(), response)
+                            (OK_RESPONSE.to_string(), json!({ "Error": "Some problem with connect to database" }))
                         }
                     }
                 }
                 _ => {
-                    let response: serde_json::Value = json!({ "Error": "Token is not valid or some problem with connect to database" });
-                    (OK_RESPONSE.to_string(), response)
+                    (OK_RESPONSE.to_string(), json!({ "Error": "Token is not valid or some problem with connect to database" }))
                 }
             }
         }
         (Err(error), Ok(_), Ok(_)) => error,
         _ => {
-            let response: serde_json::Value = json!({ "Error": "Internal server error" });
-            (INTERNAL_SERVER_ERROR.to_string(), response)
+            (INTERNAL_SERVER_ERROR.to_string(), json!({ "Error": "Internal server error" }))
         }
     }
 }

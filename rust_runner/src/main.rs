@@ -1,6 +1,6 @@
 use ant_rust_backend_lib::data::handle_req::change_access_request::handle_change_access;
 use ant_rust_backend_lib::data::handle_req::func_used_in_req::list_of_status_code::NOT_FOUND_RESPONSE;
-use ant_rust_backend_lib::data::handle_req::func_used_in_req::secret_fn::DB_URL;
+use ant_rust_backend_lib::data::handle_req::func_used_in_req::secret_fn::get_env_data;
 use ant_rust_backend_lib::data::handle_req::handle_request::handle_request;
 use ant_rust_backend_lib::data::sql_scripts::create_diag::CREATE_DIAG;
 use postgres::Error as PostgresError;
@@ -13,7 +13,8 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
 fn set_database() -> Result<(), PostgresError> {
-    let mut client = Client::connect(DB_URL, NoTls)?;
+    let db_url: &str = &get_env_data("DB_URL");
+    let mut client = Client::connect(db_url, NoTls)?;
 
     client.batch_execute(CREATE_DIAG)?;
     Ok(())
@@ -62,10 +63,10 @@ fn handle_client(mut stream: TcpStream) {
                     handle_request(r)
                 }
                 r if r.starts_with("PUT /change_access/") => handle_change_access(r),
-                _ => {
-                    let response: serde_json::Value = json!({ "Error": "Not found response" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Not found response" }),
+                ),
             };
 
             stream

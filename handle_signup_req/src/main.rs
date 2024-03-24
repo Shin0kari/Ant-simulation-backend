@@ -7,7 +7,7 @@ use ant_rust_backend_lib::data::{
     handle_req::func_used_in_req::{
         general_func::get_user_request_body,
         list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
-        secret_fn::{PasswordForDatabase, DB_URL},
+        secret_fn::{get_env_data, PasswordForDatabase},
     },
     sql_scripts::insert_script::{
         INSERT_ACH_USER_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
@@ -52,12 +52,13 @@ fn handle_sign_up(mut stream: TcpStream) {
 
             let (status_line, content) = match request.as_str() {
                 r if !r.to_string().is_empty() => sign_up_request(r),
-                _ => {
-                    let response: serde_json::Value = json!({ "Error": "Not found response" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Not found response" }),
+                ),
             };
 
+            // ставлю "//" чтобы потом можно было бы разделить status_line и content
             stream
                 .write_all((status_line + "//" + &content.to_string()).as_bytes())
                 .unwrap();
@@ -69,9 +70,10 @@ fn handle_sign_up(mut stream: TcpStream) {
 }
 
 fn sign_up_request(request: &str) -> (String, serde_json::Value) {
+    let db_url: &str = &get_env_data("DB_URL");
     match (
         get_user_request_body(request),
-        Client::connect(DB_URL, NoTls),
+        Client::connect(db_url, NoTls),
     ) {
         (Ok((user, _user_info, _user_ach, _friend_list)), Ok(mut client)) => {
             match (
@@ -99,33 +101,33 @@ fn sign_up_request(request: &str) -> (String, serde_json::Value) {
                             .execute(INSERT_ACH_USER_SCRIPT, &[&user.email])
                             .unwrap();
 
-                        let response: serde_json::Value = json!({ "Response": "User registered" });
-
-                        (OK_RESPONSE.to_string(), response)
+                        (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Response": "User registered" }),
+                        )
                     } else {
-                        let response: serde_json::Value =
-                            json!({ "Error": "This email is already taken" });
-                        (OK_RESPONSE.to_string(), response)
+                        (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Error": "This email is already taken" }),
+                        )
                     }
                 }
-                (Ok(_), Err(_)) => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "This user email or pswd is not available" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
-                _ => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "Error creating initial table" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                (Ok(_), Err(_)) => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "This user email or pswd is not available" }),
+                ),
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Error creating initial table" }),
+                ),
             }
         }
         (Ok(_), Err(_)) => {
             panic!("Error connecting to database");
         }
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Internal server error" });
-            (INTERNAL_SERVER_ERROR.to_string(), response)
-        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            json!({ "Error": "Internal server error" }),
+        ),
     }
 }

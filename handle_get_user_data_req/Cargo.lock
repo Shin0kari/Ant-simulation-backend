@@ -32,6 +32,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "jsonwebtoken",
+ "lazy_static",
  "postgres",
  "ring",
  "serde",

@@ -7,7 +7,7 @@ use ant_rust_backend_lib::data::{
     handle_req::func_used_in_req::{
         general_func::get_user_request_body,
         list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
-        secret_fn::{Claims, PasswordForDatabase, DB_URL},
+        secret_fn::{get_env_data, Claims, PasswordForDatabase},
     },
     sql_scripts::select_script::SELECT_ROLE_SCRIPT,
 };
@@ -47,12 +47,13 @@ fn handle_sign_in(mut stream: TcpStream) {
 
             let content = match request.as_str() {
                 r if !r.to_string().is_empty() => sign_in_request(r),
-                _ => {
-                    let response: serde_json::Value = json!({ "Error": "Not found response" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Not found response" }),
+                ),
             };
 
+            // ставлю "//" чтобы потом можно было бы разделить status_line и content
             stream
                 .write_all((content.0 + "//" + &content.1.to_string()).as_bytes())
                 .unwrap();
@@ -64,9 +65,10 @@ fn handle_sign_in(mut stream: TcpStream) {
 }
 
 fn sign_in_request(request: &str) -> (String, serde_json::Value) {
+    let db_url: &str = &get_env_data("DB_URL");
     match (
         get_user_request_body(request),
-        Client::connect(DB_URL, NoTls),
+        Client::connect(db_url, NoTls),
     ) {
         (Ok((user, mut user_info, _user_ach, _friend_list)), Ok(mut client)) => {
             match client.query_one(
@@ -86,43 +88,37 @@ fn sign_in_request(request: &str) -> (String, serde_json::Value) {
 
                                 if verification_complete {
                                     let token = Claims::create_jwt_token(&user, &user_info); // нужно ли делать проверку, создался ли токен?
-                                    let response: serde_json::Value = json!({ "Response": token });
-                                    (OK_RESPONSE.to_string(), response)
+
+                                    (OK_RESPONSE.to_string(), json!({ "Response": token }))
                                 } else {
-                                    let response: serde_json::Value =
-                                        json!({ "Error": "Wrong email or password" });
-                                    (OK_RESPONSE.to_string(), response)
+                                    (
+                                        OK_RESPONSE.to_string(),
+                                        json!({ "Error": "Wrong email or password" }),
+                                    )
                                 }
                             }
-                            _ => {
-                                let response: serde_json::Value =
-                                    json!({ "Error": "Trouble getting role" });
-                                (
-                                    NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
-                                    response,
-                                )
-                            }
+                            _ => (
+                                NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
+                                json!({ "Error": "Trouble getting role" }),
+                            ),
                         }
                     } else {
-                        let response: serde_json::Value =
-                            json!({ "Error": "There is no user with this email" });
                         (
                             NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
-                            response,
+                            json!({ "Error": "There is no user with this email" }),
                         )
                     }
                 }
-                _ => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "Error creating initial table" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Error creating initial table" }),
+                ),
             }
         }
         (Err(error), Ok(_)) => error,
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Internal server error" });
-            (INTERNAL_SERVER_ERROR.to_string(), response)
-        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            json!({ "Error": "Internal server error" }),
+        ),
     }
 }

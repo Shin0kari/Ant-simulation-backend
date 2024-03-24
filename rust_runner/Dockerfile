@@ -19,6 +19,6 @@ FROM alpine:latest
 WORKDIR /usr/local/bin
 
 COPY --from=builder /ant_sumilation_backend/rust_runner/target/release/rust_runner .
-COPY ./rust_runner/access_check.json .
+COPY ./ant_rust_backend_lib/src/data/access_check.json .
 
 CMD [ "./rust_runner" ]

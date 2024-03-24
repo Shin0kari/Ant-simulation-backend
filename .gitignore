@@ -1,1 +1,4 @@
 **/target
+secret_data.env
+secret_db.env
+./ant_rust_backend_lib/src/data/handle_req/func_used_in_req/secret_fn.rs

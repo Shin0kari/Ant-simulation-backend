@@ -59,14 +59,14 @@ pub fn delete_user(mut client: Client, actual_id: i32) -> (String, serde_json::V
             Ok(_delete_user_ach_line),
             Ok(_delete_user_line),
             Ok(_delete_user_from_friend_lists_line),
-        ) => {
-            let response: serde_json::Value = json!({ "Response": "User deleted" });
-            (OK_RESPONSE.to_string(), response)
-        }
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Error initial one of struct" });
-            (OK_RESPONSE.to_string(), response)
-        }
+        ) => (
+            OK_RESPONSE.to_string(),
+            json!({ "Response": "User deleted" }),
+        ),
+        _ => (
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "Error initial one of struct" }),
+        ),
     }
 }
 
@@ -138,28 +138,26 @@ pub fn update_user(
                         )
                         .unwrap();
 
-                    let response: serde_json::Value = json!({ "Response": token });
-                    (OK_RESPONSE.to_string(), response)
+                    (OK_RESPONSE.to_string(), json!({ "Response": token }))
                 }
-                (Ok(_), Err(_)) => {
-                    let response: serde_json::Value = json!({ "Error": "_check_update_user" });
-                    (OK_RESPONSE.to_string(), response)
-                }
-                (Err(_), Ok(_)) => {
-                    let response: serde_json::Value = json!({ "Error": "_check_update_user_info" });
-                    (OK_RESPONSE.to_string(), response)
-                }
-                _ => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "Error occurred while updating the user" });
-                    (OK_RESPONSE.to_string(), response)
-                }
+                (Ok(_), Err(_)) => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "_check_update_user" }),
+                ),
+                (Err(_), Ok(_)) => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "_check_update_user_info" }),
+                ),
+                _ => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "Error occurred while updating the user" }),
+                ),
             }
         }
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "An error occurred while retrieving user data when updating user info" });
-            (OK_RESPONSE.to_string(), response)
-        }
+        _ => (
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "An error occurred while retrieving user data when updating user info" }),
+        ),
     }
 }
 
@@ -176,10 +174,10 @@ pub fn select_user_data(
         (Ok(user), Ok(user_info), Ok(user_ach), Ok(friend_list)) => {
             Ok((user, user_info, user_ach, friend_list))
         }
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Error creating initial table" });
-            Err((OK_RESPONSE.to_string(), response))
-        }
+        _ => Err((
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "Error creating initial table" }),
+        )),
     }
 }
 
@@ -323,9 +321,9 @@ pub fn read_user(mut client: Client, actual_id: i32, root: &str) -> (String, ser
 
             (OK_RESPONSE.to_string(), response)
         }
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Error creating initial table" });
-            (OK_RESPONSE.to_string(), response)
-        }
+        _ => (
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "Error creating initial table" }),
+        ),
     }
 }

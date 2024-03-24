@@ -7,7 +7,7 @@ use ant_rust_backend_lib::data::handle_req::func_used_in_req::{
     general_func::{get_id_from_request, get_token_from_request, get_user_request_body},
     list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
     not_general_func::{delete_user, update_user},
-    secret_fn::{Claims, DB_URL},
+    secret_fn::{get_env_data, Claims},
 };
 
 use postgres::{Client, NoTls};
@@ -51,12 +51,13 @@ fn handle_put_del_data(mut stream: TcpStream) {
                 r if (!r.to_string().is_empty() && r.starts_with("DELETE /del_user_friend/")) => {
                     del_data_request(r)
                 }
-                _ => {
-                    let response: serde_json::Value = json!({ "Error": "Not found response" });
-                    (NOT_FOUND_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    NOT_FOUND_RESPONSE.to_string(),
+                    json!({ "Error": "Not found response" }),
+                ),
             };
 
+            // ставлю "//" чтобы потом можно было бы разделить status_line и content
             stream
                 .write_all((content.0 + "//" + &content.1.to_string()).as_bytes())
                 .unwrap();
@@ -68,17 +69,14 @@ fn handle_put_del_data(mut stream: TcpStream) {
 }
 
 fn put_data_request(request: &str) -> (String, serde_json::Value) {
+    let db_url: &str = &get_env_data("DB_URL");
     match (
         get_user_request_body(request),
         get_token_from_request(request),
-        Client::connect(DB_URL, NoTls),
+        Client::connect(db_url, NoTls),
     ) {
         (Ok((mut user, mut user_info, user_ach, _friend_list)), Ok(token), Ok(mut client)) => {
-            match (
-                Claims::verify_token(token),
-                user.clone().validate(),
-                // user_info.clone().validate(),
-            ) {
+            match (Claims::verify_token(token), user.clone().validate()) {
                 (Ok(claims), Ok(_)) => {
                     // возможно изменить на получение роли из бд
                     match claims.role.as_str() {
@@ -99,18 +97,14 @@ fn put_data_request(request: &str) -> (String, serde_json::Value) {
                                         if !user_email_presence {
                                             update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                         } else {
-                                            let response: serde_json::Value =
-                                                json!({ "Error": "This email is already taken" });
-                                            (OK_RESPONSE.to_string(), response)
+                                            (OK_RESPONSE.to_string(), json!({ "Error": "This email is already taken" }))
                                         }
                                     } else {
                                         update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                     }
                                 }
                                 _ => {
-                                    let response: serde_json::Value =
-                                        json!({ "Error": "Error creating initial table or there is no user with this id" });
-                                    (OK_RESPONSE.to_string(), response)
+                                    (OK_RESPONSE.to_string(), json!({ "Error": "Error creating initial table or there is no user with this id" }))
                                 }
                             }
                         }
@@ -142,28 +136,20 @@ fn put_data_request(request: &str) -> (String, serde_json::Value) {
                                                             update_user(&mut user, &mut user_info, user_ach, &mut client, get_id)
                                                         }
                                                         _ => {
-                                                            let response: serde_json::Value =
-                                                                json!({ "Error": "This email is already taken" });
-                                                            (OK_RESPONSE.to_string(), response)
+                                                            (OK_RESPONSE.to_string(), json!({ "Error": "This email is already taken" }))
                                                         }
                                                     }
                                                 }
                                                 _ => {
-                                                    let response: serde_json::Value =
-                                                        json!({ "Error": "Error creating initial table" });
-                                                    (OK_RESPONSE.to_string(), response)
+                                                    (OK_RESPONSE.to_string(), json!({ "Error": "Error creating initial table" }))
                                                 }
                                             }
                                         } else {
-                                            let response: serde_json::Value =
-                                                json!({ "Error": "There is no user with this id" });
-                                            (OK_RESPONSE.to_string(), response)
+                                            (OK_RESPONSE.to_string(), json!({ "Error": "There is no user with this id" }))
                                         }
                                     }
                                     _ => {
-                                        let response: serde_json::Value =
-                                            json!({ "Error": "Error creating initial table" });
-                                        (OK_RESPONSE.to_string(), response)
+                                        (OK_RESPONSE.to_string(), json!({ "Error": "Error creating initial table" }))
                                     }
                                 }
                                 }
@@ -181,58 +167,48 @@ fn put_data_request(request: &str) -> (String, serde_json::Value) {
                                             if !user_email_presence {
                                                 update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                             } else {
-                                                let response: serde_json::Value =
-                                                    json!({ "Error": "This email is already taken" });
-                                                (OK_RESPONSE.to_string(), response)
+                                                (OK_RESPONSE.to_string(), json!({ "Error": "This email is already taken" }))
                                             }
                                         } else {
                                             update_user(&mut user, &mut user_info, user_ach, &mut client, actual_id)
                                         }
                                     }
                                     _ => {
-                                        let response: serde_json::Value =
-                                            json!({ "Error": "Error creating initial table" });
-                                        (OK_RESPONSE.to_string(), response)
+                                        (OK_RESPONSE.to_string(), json!({ "Error": "Error creating initial table" }))
                                     }
                                 }
                                 }
                             }
                         }
-                        _ => {
-                            let response: serde_json::Value =
-                                json!({ "Error": "This role has no privileges" });
-                            (OK_RESPONSE.to_string(), response)
-                        }
+                        _ => (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Error": "This role has no privileges" }),
+                        ),
                     }
                 }
-                (Ok(_), Err(_)) => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "This user email or password is not available" });
-                    (OK_RESPONSE.to_string(), response)
-                }
-                // (Ok(_), Ok(_), Err(_)) => {
-                //     let response: serde_json::Value =
-                //         json!({ "Error": "This user nickname is not available" });
-                //     (OK_RESPONSE.to_string(), response)
-                // }
-                _ => {
-                    let response: serde_json::Value = json!({ "Error": "Token is invalid" });
-                    (OK_RESPONSE.to_string(), response)
-                }
+                (Ok(_), Err(_)) => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "This user email or password is not available" }),
+                ),
+                _ => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "Token is invalid" }),
+                ),
             }
         }
         (Err(error), Ok(_), Ok(_)) => error,
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Internal server error" });
-            (INTERNAL_SERVER_ERROR.to_string(), response)
-        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            json!({ "Error": "Internal server error" }),
+        ),
     }
 }
 
 fn del_data_request(request: &str) -> (String, serde_json::Value) {
+    let db_url: &str = &get_env_data("DB_URL");
     match (
         get_token_from_request(request),
-        Client::connect(DB_URL, NoTls),
+        Client::connect(db_url, NoTls),
     ) {
         (Ok(token), Ok(mut client)) => match Claims::verify_token(token) {
             Ok(claims) => match claims.role.as_str() {
@@ -245,10 +221,10 @@ fn del_data_request(request: &str) -> (String, serde_json::Value) {
                             let actual_id: i32 = id.get(0);
                             delete_user(client, actual_id)
                         }
-                        _ => {
-                            let response: serde_json::Value = json!({ "Error": "Error creating initial table or there is no user with this email" });
-                            (OK_RESPONSE.to_string(), response)
-                        }
+                        _ => (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Error": "Error creating initial table or there is no user with this email" }),
+                        ),
                     }
                 }
                 "admin" => match get_id_from_request(request).parse::<i32>() {
@@ -262,28 +238,26 @@ fn del_data_request(request: &str) -> (String, serde_json::Value) {
                                 let actual_id: i32 = get_id.get(0);
                                 delete_user(client, actual_id)
                             }
-                            _ => {
-                                let response: serde_json::Value =
-                                    json!({ "Error": "Error creating initial table" });
-                                (OK_RESPONSE.to_string(), response)
-                            }
+                            _ => (
+                                OK_RESPONSE.to_string(),
+                                json!({ "Error": "Error creating initial table" }),
+                            ),
                         }
                     }
                 },
-                _ => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "This role has no privileges" });
-                    (OK_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "This role has no privileges" }),
+                ),
             },
-            _ => {
-                let response: serde_json::Value = json!({ "Error": "Token is invalid" });
-                (OK_RESPONSE.to_string(), response)
-            }
+            _ => (
+                OK_RESPONSE.to_string(),
+                json!({ "Error": "Token is invalid" }),
+            ),
         },
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Internal server error" });
-            (INTERNAL_SERVER_ERROR.to_string(), response)
-        }
+        _ => (
+            INTERNAL_SERVER_ERROR.to_string(),
+            json!({ "Error": "Internal server error" }),
+        ),
     }
 }

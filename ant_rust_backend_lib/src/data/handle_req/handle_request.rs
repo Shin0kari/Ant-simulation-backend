@@ -52,26 +52,23 @@ pub fn handle_request(request: &str) -> (String, serde_json::Value) {
                 let status_line_and_content: Vec<_> = answer.split("//").collect();
 
                 (
-                        status_line_and_content[0].to_string(),
-                        serde_json::from_str::<Value>(
-                            status_line_and_content
-                                .last()
-                                .unwrap_or(&"Having trouble retrieving content from the response")
-                                .trim_end_matches('\0'),
-                        )
-                        .unwrap_or(
-                            json!({ "Error": "Having trouble getting the last value from the content" }),
-                        ),
+                    status_line_and_content[0].to_string(),
+                    serde_json::from_str::<Value>(
+                        status_line_and_content
+                            .last()
+                            .unwrap_or(&"Having trouble retrieving content from the response")
+                            .trim_end_matches('\0'),
                     )
+                    .unwrap_or(
+                        json!({ "Error": "Having trouble getting the last value from the content" }),
+                    ),
+                )
             }
-            false => {
-                // let response: serde_json::Value = json!({ "Error": "error" });
-                (NOT_FOUND_RESPONSE.to_string(), json!({ "Error": "error" }))
-            }
+            false => (
+                NOT_FOUND_RESPONSE.to_string(),
+                json!({ "Error": "This request has been disabled" }),
+            ),
         },
-        Err(error) => {
-            let response: serde_json::Value = json!({ "Error": error });
-            (NOT_FOUND_RESPONSE.to_string(), response)
-        }
+        Err(error) => (NOT_FOUND_RESPONSE.to_string(), json!({ "Error": error })),
     }
 }

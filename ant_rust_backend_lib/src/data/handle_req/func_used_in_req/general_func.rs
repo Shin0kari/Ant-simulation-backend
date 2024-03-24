@@ -73,11 +73,10 @@ pub fn get_user_request_body(
 
             Ok((user, user_info, user_ach, friend_list))
         }
-        _ => {
-            let response: serde_json::Value =
-                json!({ "Error": "error occurred while processing the request" });
-            Err((OK_RESPONSE.to_string(), response))
-        }
+        _ => Err((
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "error occurred while processing the request" }),
+        )),
     }
 }
 

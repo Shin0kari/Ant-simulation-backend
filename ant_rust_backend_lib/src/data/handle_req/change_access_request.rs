@@ -17,7 +17,7 @@ pub fn handle_change_access(request: &str) -> (String, Value) {
         Ok(token) => match Claims::verify_token(token) {
             Ok(claims) => match claims.role.as_str() {
                 "admin" => {
-                    let module_name = "/".to_string();
+                    let module_name = "".to_string();
                     let module_name: &str = &(module_name
                         + request
                             .split('/')
@@ -35,12 +35,11 @@ pub fn handle_change_access(request: &str) -> (String, Value) {
                         .next()
                         .unwrap_or_default();
 
-                    println!("Module_name: {}, State: {}", module_name, module_state);
-
                     if module_name.is_empty() || module_state.is_empty() {
-                        let response: serde_json::Value =
-                            json!({ "Error": "Module name or state not provided" });
-                        return (NOT_FOUND_RESPONSE.to_string(), response);
+                        return (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Error": "Module name or state not provided" }),
+                        );
                     }
 
                     let mut file = File::open("access_check.json").expect("Файл не найден");
@@ -49,8 +48,14 @@ pub fn handle_change_access(request: &str) -> (String, Value) {
                     file.read_to_string(&mut data)
                         .expect("Ошибка при чтении файла");
 
-                    let mut json: Value =
-                        serde_json::from_str(&data).expect("Ошибка при парсинге JSON");
+                    let mut json: Value = serde_json::from_str(&data).expect("Error parsing JSON");
+
+                    if json[module_name].is_null() {
+                        return (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Error": "There is no module with this name" }),
+                        );
+                    }
 
                     json[module_name]["state"] = module_state.into();
 
@@ -67,25 +72,25 @@ pub fn handle_change_access(request: &str) -> (String, Value) {
                         .expect("Ошибка при записи в файл");
 
                     {
-                        let response: serde_json::Value =
-                            json!({ "Result": "The file was successfully modified" });
-                        (NOT_FOUND_RESPONSE.to_string(), response)
+                        (
+                            OK_RESPONSE.to_string(),
+                            json!({ "Result": "The file was successfully modified" }),
+                        )
                     }
                 }
-                _ => {
-                    let response: serde_json::Value =
-                        json!({ "Error": "you do not have sufficient access rights" });
-                    (OK_RESPONSE.to_string(), response)
-                }
+                _ => (
+                    OK_RESPONSE.to_string(),
+                    json!({ "Error": "you do not have sufficient access rights" }),
+                ),
             },
-            _ => {
-                let response: serde_json::Value = json!({ "Error": "Token is invalid" });
-                (OK_RESPONSE.to_string(), response)
-            }
+            _ => (
+                OK_RESPONSE.to_string(),
+                json!({ "Error": "Token is invalid" }),
+            ),
         },
-        _ => {
-            let response: serde_json::Value = json!({ "Error": "Not found response" });
-            (NOT_FOUND_RESPONSE.to_string(), response)
-        }
+        _ => (
+            NOT_FOUND_RESPONSE.to_string(),
+            json!({ "Error": "Not found response" }),
+        ),
     }
 }
