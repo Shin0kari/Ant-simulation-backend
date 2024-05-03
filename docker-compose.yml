@@ -13,6 +13,11 @@ services:
       - '8080:8080'
     depends_on:
       - db
+      - rust_sign_up
+      - rust_sign_in
+      - rust_get_user_data
+      - rust_put_del_user_data
+      - rust_post_del_friend
     networks:
       - mynetwork
 
@@ -42,8 +47,6 @@ services:
       dockerfile: ./handle_signup_req/Dockerfile
     expose:
       - '5544'
-    depends_on:
-      - rust_runner
     networks:
       - mynetwork
 
@@ -57,8 +60,6 @@ services:
       dockerfile: ./handle_signin_req/Dockerfile
     expose:
       - '5545'
-    depends_on:
-      - rust_runner
     networks:
       - mynetwork
 
@@ -72,8 +73,6 @@ services:
       dockerfile: ./handle_get_user_data_req/Dockerfile
     expose:
       - '5546'
-    depends_on:
-      - rust_runner
     networks:
       - mynetwork
 
@@ -87,8 +86,6 @@ services:
       dockerfile: ./handle_put_del_user_data_req/Dockerfile
     expose:
       - '5547'
-    depends_on:
-      - rust_runner
     networks:
       - mynetwork
 
@@ -102,8 +99,6 @@ services:
       dockerfile: ./handle_post_del_friend_req/Dockerfile
     expose:
       - '5548'
-    depends_on:
-      - rust_runner
     networks:
       - mynetwork
 

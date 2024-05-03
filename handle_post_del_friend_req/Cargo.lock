@@ -282,6 +282,7 @@ dependencies = [
  "postgres",
  "serde_json",
  "simple_threadpool_func_bio",
+ "validator",
 ]
 
 [[package]]

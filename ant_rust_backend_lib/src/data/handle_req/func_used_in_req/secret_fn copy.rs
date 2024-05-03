@@ -48,12 +48,11 @@ pub struct Claims {
     pub iat: OffsetDateTime,
     #[serde(with = "jwt_numeric_date")]
     pub exp: OffsetDateTime,
-    pub pswd: String, // мб это убрать
+    pub pswd: String,
     pub role: String,
 }
 
 impl Claims {
-    // Проверка JWT
     pub fn verify_token(token: &str) -> Result<Claims, (String, serde_json::Value)> {
         let key: &str = &get_env_data("KEY");
         let decoding_key = DecodingKey::from_secret(key.as_bytes());
@@ -78,7 +77,6 @@ impl Claims {
         }
     }
 
-    // если меняется одно из aud(email), pswd, role то создаём заново токен для пользователя< (No self?)
     pub fn create_jwt_token(user: &User, user_info: &UserInfo) -> String {
         let key: &str = &get_env_data("KEY");
         let my_claims = Claims {
@@ -128,14 +126,13 @@ impl PasswordForDatabase {
             // нужно сгенерировать новый
             db_salt_component: [
                 // This value was generated from a secure PRNG.
-                0x71, 0xe9, 0x4c, 0xb2, 0x13, 0x8f, 0xd7, 0xae, 0x6d, 0x22, 0x9a, 0x50, 0xc3, 0x01,
-                0x7b, 0xf6,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00,
             ],
         };
 
         let salt = db.salt(user.email.as_ref().unwrap());
         let mut hash_pswd: Credential = [0u8; CREDENTIAL_LEN];
-        // unwrap заменить на match (где точное не будет None там можно оставить unwrap с комментарием)
         pbkdf2::derive(
             PBKDF2_ALG,
             db.pbkdf2_iterations,
@@ -148,7 +145,6 @@ impl PasswordForDatabase {
     }
 
     pub fn verify_password(user: &User, client: &mut Client) -> bool {
-        // добавить проверку подключения к бд
         match client.query_one(
             "SELECT users.pswd FROM users WHERE users.email = $1",
             &[&user.email],
@@ -163,8 +159,8 @@ impl PasswordForDatabase {
         }
     }
 
-    // возможно генерацию соли нужно убрать в скрытый файл для безопасности
     fn salt(&self, email: &str) -> Vec<u8> {
+        // можно изменить и добавить чтото для увеличения безопасности
         let mut salt = Vec::with_capacity(self.db_salt_component.len() + email.as_bytes().len());
         salt.extend(self.db_salt_component.as_ref());
         salt

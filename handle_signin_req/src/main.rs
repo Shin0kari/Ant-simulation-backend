@@ -18,7 +18,7 @@ use postgres::{Client, NoTls};
 
 fn main() {
     let listener = TcpListener::bind("0.0.0.0:5545").unwrap();
-    let pool = ThreadPool::new(1);
+    let pool = ThreadPool::new(3);
 
     for stream in listener.incoming() {
         match stream {
@@ -66,59 +66,124 @@ fn handle_sign_in(mut stream: TcpStream) {
 
 fn sign_in_request(request: &str) -> (String, serde_json::Value) {
     let db_url: &str = &get_env_data("DB_URL");
-    match (
-        get_user_request_body(request),
-        Client::connect(db_url, NoTls),
-    ) {
-        (Ok((user, mut user_info, _user_ach, _friend_list)), Ok(mut client)) => {
-            match client.query_one(
-                "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
-                &[&user.email],
-            ) {
-                Ok(email_presence) => {
-                    let user_email_presence: bool = email_presence.get(0);
 
-                    if user_email_presence {
-                        match client.query_one(SELECT_ROLE_SCRIPT, &[&user.email]) {
-                            Ok(user_role) => {
-                                user_info.role = Some(user_role.get(0));
+    let (user, mut user_info) = match get_user_request_body(request) {
+        Ok(new_user_data) => (new_user_data.0, new_user_data.1),
+        Err(err) => return err,
+    };
 
-                                let verification_complete =
-                                    PasswordForDatabase::verify_password(&user, &mut client);
-
-                                if verification_complete {
-                                    let token = Claims::create_jwt_token(&user, &user_info); // нужно ли делать проверку, создался ли токен?
-
-                                    (OK_RESPONSE.to_string(), json!({ "Response": token }))
-                                } else {
-                                    (
-                                        OK_RESPONSE.to_string(),
-                                        json!({ "Error": "Wrong email or password" }),
-                                    )
-                                }
-                            }
-                            _ => (
-                                NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
-                                json!({ "Error": "Trouble getting role" }),
-                            ),
-                        }
-                    } else {
-                        (
-                            NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
-                            json!({ "Error": "There is no user with this email" }),
-                        )
-                    }
-                }
-                _ => (
-                    NOT_FOUND_RESPONSE.to_string(),
-                    json!({ "Error": "Error creating initial table" }),
-                ),
-            }
+    let mut client: Client = match Client::connect(db_url, NoTls) {
+        Ok(client_conn) => client_conn,
+        Err(_err) => {
+            return (
+                INTERNAL_SERVER_ERROR.to_string(),
+                json!({ "Error": "Error connecting to database" }),
+            )
         }
-        (Err(error), Ok(_)) => error,
-        _ => (
-            INTERNAL_SERVER_ERROR.to_string(),
-            json!({ "Error": "Internal server error" }),
-        ),
+    };
+
+    // check mail availability and data validation
+    let check_mail = match client.query_one(
+        "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
+        &[&user.email],
+    ) {
+        Ok(check_mail) => check_mail,
+        _ => {
+            return (
+                INTERNAL_SERVER_ERROR.to_string(),
+                json!({ "Error": "Error creating initial table" }),
+            )
+        }
+    };
+
+    let user_email_presence: bool = check_mail.get(0);
+    if !user_email_presence {
+        return (
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "There is no user with this email" }),
+        );
+    };
+
+    let user_role = match client.query_one(SELECT_ROLE_SCRIPT, &[&user.email]) {
+        Ok(user_role) => user_role,
+        _ => {
+            return (
+                INTERNAL_SERVER_ERROR.to_string(),
+                json!({ "Error": "Trouble getting role" }),
+            );
+        }
+    };
+
+    user_info.role = Some(user_role.get(0));
+
+    let verification_complete = PasswordForDatabase::verify_password(&user, &mut client);
+    if verification_complete {
+        let token = Claims::create_jwt_token(&user, &user_info);
+
+        (OK_RESPONSE.to_string(), json!({ "Response": token }))
+    } else {
+        (
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "Wrong email or password" }),
+        )
     }
 }
+
+// fn sign_in_request(request: &str) -> (String, serde_json::Value) {
+//     let db_url: &str = &get_env_data("DB_URL");
+//     match (
+//         get_user_request_body(request),
+//         Client::connect(db_url, NoTls),
+//     ) {
+//         (Ok((user, mut user_info, _user_ach, _friend_list)), Ok(mut client)) => {
+//             match client.query_one(
+//                 "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
+//                 &[&user.email],
+//             ) {
+//                 Ok(email_presence) => {
+//                     let user_email_presence: bool = email_presence.get(0);
+
+//                     if user_email_presence {
+//                         match client.query_one(SELECT_ROLE_SCRIPT, &[&user.email]) {
+//                             Ok(user_role) => {
+//                                 user_info.role = Some(user_role.get(0));
+
+//                                 let verification_complete =
+//                                     PasswordForDatabase::verify_password(&user, &mut client);
+
+//                                 if verification_complete {
+//                                     let token = Claims::create_jwt_token(&user, &user_info);
+
+//                                     (OK_RESPONSE.to_string(), json!({ "Response": token }))
+//                                 } else {
+//                                     (
+//                                         OK_RESPONSE.to_string(),
+//                                         json!({ "Error": "Wrong email or password" }),
+//                                     )
+//                                 }
+//                             }
+//                             _ => (
+//                                 NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
+//                                 json!({ "Error": "Trouble getting role" }),
+//                             ),
+//                         }
+//                     } else {
+//                         (
+//                             NOT_FOUND_RESPONSE.to_string(), // изменить на другу ошибку
+//                             json!({ "Error": "There is no user with this email" }),
+//                         )
+//                     }
+//                 }
+//                 _ => (
+//                     NOT_FOUND_RESPONSE.to_string(),
+//                     json!({ "Error": "Error creating initial table" }),
+//                 ),
+//             }
+//         }
+//         (Err(error), Ok(_)) => error,
+//         _ => (
+//             INTERNAL_SERVER_ERROR.to_string(),
+//             json!({ "Error": "Internal server error" }),
+//         ),
+//     }
+// }

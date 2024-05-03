@@ -45,7 +45,7 @@ use super::{
     user_struct::{User, UserAch, UserInfo, UserListFriend},
 };
 
-pub fn delete_user(mut client: Client, actual_id: i32) -> (String, serde_json::Value) {
+pub fn delete_user(client: &mut Client, actual_id: i32) -> (String, serde_json::Value) {
     match (
         client.execute(DELETE_USER_INFO_SCRIPT, &[&actual_id]),
         client.execute(DELETE_FRIEND_LIST_SCRIPT, &[&actual_id]),
@@ -250,8 +250,8 @@ fn get_friend_email(actual_id: i32, client: &mut Client) -> Result<String, Postg
 }
 
 // изменить отображение friend_id более удобное для сервера
-pub fn read_user(mut client: Client, actual_id: i32, root: &str) -> (String, serde_json::Value) {
-    match select_user_data(actual_id, &mut client) {
+pub fn read_user(client: &mut Client, actual_id: i32, root: &str) -> (String, serde_json::Value) {
+    match select_user_data(actual_id, client) {
         Ok((user, user_info, user_ach, friend_list)) => {
             let mut ach_str = "".to_string();
             // no unwrap?
@@ -262,11 +262,12 @@ pub fn read_user(mut client: Client, actual_id: i32, root: &str) -> (String, ser
                     ach_str += "false "
                 }
             }
+            ach_str = ach_str.trim_end().to_string();
 
             let mut friends_email_vec: Vec<String> = Vec::new();
             // let mut friends_id_str = "".to_string();
             for id in friend_list.frined_list.unwrap() {
-                match get_friend_email(id, &mut client) {
+                match get_friend_email(id, client) {
                     Ok(data_email) => {
                         friends_email_vec.push(data_email);
                     }

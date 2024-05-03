@@ -22,8 +22,9 @@ pub struct UserAch {
     pub ach: Option<Vec<bool>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Validate, Clone)]
 pub struct UserListFriend {
     pub frined_list: Option<Vec<i32>>,
+    #[validate(email)]
     pub friend_email: Option<String>,
 }

@@ -8,6 +8,7 @@ use ant_rust_backend_lib::data::{
         general_func::get_user_request_body,
         list_of_status_code::{INTERNAL_SERVER_ERROR, NOT_FOUND_RESPONSE, OK_RESPONSE},
         secret_fn::{get_env_data, PasswordForDatabase},
+        user_struct::User,
     },
     sql_scripts::insert_script::{
         INSERT_ACH_USER_SCRIPT, INSERT_USER_INFO_SCRIPT, INSERT_USER_SCRIPT,
@@ -23,7 +24,7 @@ use postgres::{Client, NoTls};
 
 fn main() {
     let listener = TcpListener::bind("0.0.0.0:5544").unwrap();
-    let pool = ThreadPool::new(1);
+    let pool = ThreadPool::new(3);
 
     for stream in listener.incoming() {
         match stream {
@@ -71,63 +72,134 @@ fn handle_sign_up(mut stream: TcpStream) {
 
 fn sign_up_request(request: &str) -> (String, serde_json::Value) {
     let db_url: &str = &get_env_data("DB_URL");
-    match (
-        get_user_request_body(request),
-        Client::connect(db_url, NoTls),
-    ) {
-        (Ok((user, _user_info, _user_ach, _friend_list)), Ok(mut client)) => {
-            match (
-                client.query_one(
-                    "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
-                    &[&user.email],
-                ),
-                user.clone().validate(),
-            ) {
-                (Ok(check_email), Ok(_)) => {
-                    let user_email_presence: bool = check_email.get(0);
 
-                    if !user_email_presence {
-                        let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
+    let user: User = match get_user_request_body(request) {
+        Ok(new_user_data) => new_user_data.0,
+        Err(err) => return err,
+    };
 
-                        // добавить match, чтобы сделать проверку, прошли ли все изменения без ошибок, в ином случае чтобы изменения отменились
-                        // скорее всего добавлять в файл не прошедшие изменения
-                        client
-                            .execute(INSERT_USER_SCRIPT, &[&hash_pswd, &user.email])
-                            .unwrap();
-                        client
-                            .execute(INSERT_USER_INFO_SCRIPT, &[&user.email])
-                            .unwrap();
-                        client
-                            .execute(INSERT_ACH_USER_SCRIPT, &[&user.email])
-                            .unwrap();
-
-                        (
-                            OK_RESPONSE.to_string(),
-                            json!({ "Response": "User registered" }),
-                        )
-                    } else {
-                        (
-                            OK_RESPONSE.to_string(),
-                            json!({ "Error": "This email is already taken" }),
-                        )
-                    }
-                }
-                (Ok(_), Err(_)) => (
-                    NOT_FOUND_RESPONSE.to_string(),
-                    json!({ "Error": "This user email or pswd is not available" }),
-                ),
-                _ => (
-                    NOT_FOUND_RESPONSE.to_string(),
-                    json!({ "Error": "Error creating initial table" }),
-                ),
-            }
+    let mut client: Client = match Client::connect(db_url, NoTls) {
+        Ok(client_conn) => client_conn,
+        Err(_err) => {
+            return (
+                INTERNAL_SERVER_ERROR.to_string(),
+                json!({ "Error": "Error connecting to database" }),
+            )
         }
-        (Ok(_), Err(_)) => {
-            panic!("Error connecting to database");
-        }
-        _ => (
-            INTERNAL_SERVER_ERROR.to_string(),
-            json!({ "Error": "Internal server error" }),
+    };
+
+    // check mail availability and data validation
+    let check_mail = match (
+        client.query_one(
+            "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
+            &[&user.email],
         ),
-    }
+        user.clone().validate(),
+    ) {
+        (Ok(check_email), Ok(_)) => check_email,
+        (Ok(_), Err(_)) => {
+            return (
+                OK_RESPONSE.to_string(),
+                json!({ "Error": "This user email or pswd is not available" }),
+            )
+        }
+        _ => {
+            return (
+                INTERNAL_SERVER_ERROR.to_string(),
+                json!({ "Error": "Error creating initial table" }),
+            )
+        }
+    };
+
+    let user_email_presence: bool = check_mail.get(0);
+    if user_email_presence {
+        return (
+            OK_RESPONSE.to_string(),
+            json!({ "Error": "This email is already taken" }),
+        );
+    };
+
+    let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
+
+    // добавить match, чтобы сделать проверку, прошли ли все изменения без ошибок, в ином случае чтобы изменения отменились
+    // скорее всего добавлять в файл не прошедшие изменения
+    client
+        .execute(INSERT_USER_SCRIPT, &[&hash_pswd, &user.email])
+        .unwrap();
+    // в нижних запросах имеется проверка на наличие созданного пользователя
+    client
+        .execute(INSERT_USER_INFO_SCRIPT, &[&user.email])
+        .unwrap();
+    client
+        .execute(INSERT_ACH_USER_SCRIPT, &[&user.email])
+        .unwrap();
+
+    (
+        OK_RESPONSE.to_string(),
+        json!({ "Response": "User registered" }),
+    )
 }
+
+// fn sign_up_request(request: &str) -> (String, serde_json::Value) {
+//     let db_url: &str = &get_env_data("DB_URL");
+//     match (
+//         get_user_request_body(request),
+//         Client::connect(db_url, NoTls),
+//     ) {
+//         (Ok((user, _user_info, _user_ach, _friend_list)), Ok(mut client)) => {
+//             match (
+//                 client.query_one(
+//                     "SELECT EXISTS(SELECT users.email FROM users WHERE users.email = $1)",
+//                     &[&user.email],
+//                 ),
+//                 user.clone().validate(),
+//             ) {
+//                 (Ok(check_email), Ok(_)) => {
+//                     let user_email_presence: bool = check_email.get(0);
+
+//                     if !user_email_presence {
+//                         let hash_pswd = PasswordForDatabase::generate_hash_password(&user);
+
+//                         // добавить match, чтобы сделать проверку, прошли ли все изменения без ошибок, в ином случае чтобы изменения отменились
+//                         // скорее всего добавлять в файл не прошедшие изменения
+//                         client
+//                             .execute(INSERT_USER_SCRIPT, &[&hash_pswd, &user.email])
+//                             .unwrap();
+//                         client
+//                             .execute(INSERT_USER_INFO_SCRIPT, &[&user.email])
+//                             .unwrap();
+//                         client
+//                             .execute(INSERT_ACH_USER_SCRIPT, &[&user.email])
+//                             .unwrap();
+
+//                         (
+//                             OK_RESPONSE.to_string(),
+//                             json!({ "Response": "User registered" }),
+//                         )
+//                     } else {
+//                         (
+//                             OK_RESPONSE.to_string(),
+//                             json!({ "Error": "This email is already taken" }),
+//                         )
+//                     }
+//                 }
+//                 (Ok(_), Err(_)) => (
+//                     NOT_FOUND_RESPONSE.to_string(),
+//                     json!({ "Error": "This user email or pswd is not available" }),
+//                 ),
+//                 _ => (
+//                     NOT_FOUND_RESPONSE.to_string(),
+//                     json!({ "Error": "Error creating initial table" }),
+//                 ),
+//             }
+//         }
+//         (Ok(_), Err(_)) => (
+//             INTERNAL_SERVER_ERROR.to_string(),
+//             json!({ "Error": "Error connecting to database" }),
+//         ),
+//         _ => (
+//             INTERNAL_SERVER_ERROR.to_string(),
+//             json!({ "Error": "Internal server error" }),
+//         ),
+//     }
+// }

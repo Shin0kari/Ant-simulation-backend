@@ -7,7 +7,6 @@ use postgres::Error as PostgresError;
 use postgres::{Client, NoTls};
 
 use serde_json::json;
-// use std::env;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -51,6 +50,7 @@ fn handle_client(mut stream: TcpStream) {
         Ok(size) => {
             request.push_str(String::from_utf8_lossy(&buffer[..size]).as_ref());
 
+            println!("Request: {}", request);
             let (status_line, content) = match request.as_str() {
                 r if (r.starts_with("POST /sign_up")
                     || r.starts_with("POST /sign_in")
@@ -58,7 +58,7 @@ fn handle_client(mut stream: TcpStream) {
                     || r.starts_with("POST /post_user_friend/")
                     || r.starts_with("DELETE /del_user_friend/")
                     || r.starts_with("GET /get_user_data/")
-                    || r.starts_with("DELETE /delete_user/")) =>
+                    || r.starts_with("DELETE /delete_user_data/")) =>
                 {
                     handle_request(r)
                 }
